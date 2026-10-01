@@ -1,4 +1,5 @@
 import AppKit
+import MonitorCore
 import ServiceManagement
 import SwiftUI
 
@@ -12,7 +13,7 @@ struct NetworkMonitorApp: App {
         MenuBarExtra {
             MenuBarContent(engine: delegate.engine)
         } label: {
-            Image(systemName: "network")
+            MenuBarLabel(engine: delegate.engine)
         }
         .menuBarExtraStyle(.window)
 
@@ -20,6 +21,26 @@ struct NetworkMonitorApp: App {
             DetailView(engine: delegate.engine)
         }
         .defaultSize(width: 860, height: 640)
+    }
+}
+
+/// Live throughput in the menu bar itself, so the common question — is something
+/// using the network right now, and how much — needs no click.
+///
+/// The rate collapses to the bare icon when idle rather than sitting at zero, which
+/// would be permanent clutter for most of the day.
+private struct MenuBarLabel: View {
+    let engine: MonitorEngine
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "network")
+
+            if engine.isLive {
+                Text("↓\(compactRate(engine.rate.received)) ↑\(compactRate(engine.rate.sent))")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+            }
+        }
     }
 }
 

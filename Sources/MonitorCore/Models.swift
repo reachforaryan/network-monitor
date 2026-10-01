@@ -142,3 +142,28 @@ public func formatBytes(_ bytes: UInt64) -> String {
 public func formatRate(_ bytesPerSecond: Double) -> String {
     formatBytes(UInt64(max(0, bytesPerSecond))) + "/s"
 }
+
+/// A rate in exactly four characters, for the menu bar.
+///
+/// The menu bar re-lays out whenever its label changes width, so a varying-width
+/// readout makes everything to its left twitch every two seconds. Fixed width plus
+/// monospaced digits keeps it still. Kilobytes is the smallest unit — below that the
+/// caller shows nothing at all.
+public func compactRate(_ bytesPerSecond: Double) -> String {
+    let bytes = max(0, bytesPerSecond)
+
+    // Thresholds sit just below the round number so a value that *rounds* up to 1000
+    // promotes to the next unit instead of printing a fourth digit.
+    let unit: (scale: Double, suffix: String) =
+        switch bytes {
+        case 999.5e6...: (1e9, "G")
+        case 999.5e3..<999.5e6: (1e6, "M")
+        default: (1e3, "K")
+        }
+
+    let value = bytes / unit.scale
+    // Likewise 9.99 must not print as "10.0", which is one character too many.
+    let digits = value < 9.95 ? String(format: "%.1f", value) : String(Int(value.rounded()))
+
+    return String(repeating: " ", count: max(0, 3 - digits.count)) + digits + unit.suffix
+}
