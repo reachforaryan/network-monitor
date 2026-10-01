@@ -86,8 +86,9 @@ struct DetailView: View {
                             .foregroundStyle(.secondary)
                     }
             } else {
+                let data = chartData
                 Chart {
-                    ForEach(seriesRows) { row in
+                    ForEach(data.rows) { row in
                         LineMark(
                             x: .value("Time", row.date),
                             y: .value("Bytes", row.bytes),
@@ -108,11 +109,11 @@ struct DetailView: View {
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                             .foregroundStyle(Theme.grid)
                             .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
-                                tooltip(at: marker.date)
+                                tooltip(at: marker.date, data: data)
                             }
                     }
                 }
-                .chartForegroundStyleScale(domain: seriesNames, range: seriesColors)
+                .chartForegroundStyleScale(domain: data.names, range: data.colors)
                 .chartXSelection(value: $hovered)
                 .chartYAxis {
                     AxisMarks { value in
@@ -137,16 +138,16 @@ struct DetailView: View {
         }
     }
 
-    private func tooltip(at date: Date) -> some View {
+    private func tooltip(at date: Date, data: ChartData) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(date.formatted(engine.period.tooltipFormat))
                 .font(.caption2.weight(.semibold))
 
-            ForEach(seriesNames, id: \.self) { name in
-                if let bytes = bytes(for: name, at: date) {
+            ForEach(Array(data.names.enumerated()), id: \.element) { index, name in
+                if let bytes = data.values[name]?[date] {
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(color(for: name))
+                            .fill(data.colors[index])
                             .frame(width: 6, height: 6)
                         Text(name)
                             .lineLimit(1)
@@ -202,46 +203,61 @@ struct DetailView: View {
         var id: String { "\(series)@\(date.timeIntervalSince1970)" }
     }
 
+    /// Everything the chart needs, built in one pass. The tooltip used to look values
+    /// up by rebuilding this for every series on every hover frame.
+    private struct ChartData {
+        let rows: [SeriesRow]
+        let names: [String]
+        let colors: [Color]
+        let values: [String: [Date: UInt64]]
+    }
+
     /// The total line plus one line per charted app.
     ///
     /// Each app is given a value at every bucket the chart plots, zero included. A
     /// sparse series would otherwise draw a straight line across the quiet stretches,
     /// implying traffic that never happened — and an app seen in a single bucket, like
     /// a one-off download, would have no line to draw at all.
-    private var seriesRows: [SeriesRow] {
+    private var chartData: ChartData {
         let buckets = engine.totalSeries.map(\.date)
 
         var rows = engine.totalSeries.map {
             SeriesRow(series: Self.totalSeriesName, date: $0.date, bytes: $0.bytes)
         }
+        var names = [Self.totalSeriesName]
+        var colors = [Theme.total]
+        var values = [Self.totalSeriesName: Dictionary(
+            engine.totalSeries.map { ($0.date, $0.bytes) },
+            uniquingKeysWith: +
+        )]
 
         for app in engine.topApps {
             guard let points = engine.appSeries[app.key] else { continue }
+
+            let name = seriesName(for: app, taken: names)
             let byBucket = Dictionary(points.map { ($0.date, $0.bytes) }, uniquingKeysWith: +)
-            rows += buckets.map {
-                SeriesRow(series: app.displayName, date: $0, bytes: byBucket[$0] ?? 0)
-            }
+            let filled = Dictionary(uniqueKeysWithValues: buckets.map { ($0, byBucket[$0] ?? 0) })
+
+            // Built from `buckets`, not `filled`: a line connects its points in data
+            // order, and a dictionary has none.
+            rows += buckets.map { SeriesRow(series: name, date: $0, bytes: filled[$0] ?? 0) }
+            names.append(name)
+            colors.append(Theme.color(slot: engine.colorSlots[app.key]))
+            values[name] = filled
         }
 
-        return rows
+        return ChartData(rows: rows, names: names, colors: colors, values: values)
     }
 
-    private var seriesNames: [String] {
-        [Self.totalSeriesName] + engine.topApps.filter { engine.appSeries[$0.key] != nil }.map(\.displayName)
-    }
+    /// Display names aren't unique — two copies of an app, or two daemons sharing a
+    /// filename, would otherwise collapse into one zigzagging series drawn across both
+    /// apps' values.
+    private func seriesName(for app: AppUsage, taken: [String]) -> String {
+        let base = app.displayName
+        guard taken.contains(base) else { return base }
 
-    private var seriesColors: [Color] {
-        seriesNames.map(color(for:))
-    }
-
-    private func color(for series: String) -> Color {
-        guard series != Self.totalSeriesName else { return Theme.total }
-        let slot = engine.topApps.first { $0.displayName == series }.flatMap { engine.colorSlots[$0.key] }
-        return Theme.color(slot: slot)
-    }
-
-    private func bytes(for series: String, at date: Date) -> UInt64? {
-        seriesRows.first { $0.series == series && $0.date == date }?.bytes
+        let folder = ((app.key as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        return folder.isEmpty ? app.key : "\(base) (\(folder))"
     }
 
     /// Selection reports an interpolated x, so snap to the bucket actually plotted.
