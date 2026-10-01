@@ -81,3 +81,13 @@ import Testing
     let started = try #require(Collector.startTime(pid: ProcessInfo.processInfo.processIdentifier))
     #expect(started <= Date())
 }
+
+@Test func clampingLiftsAllTrafficToAtLeastExternalTraffic() {
+    // A process caught in the external snapshot but gone from the unfiltered one.
+    let lopsided = Counters(extIn: 5_000, extOut: 900, allIn: 0, allOut: 0)
+    #expect(lopsided.clampedToExternal == Counters(extIn: 5_000, extOut: 900, allIn: 5_000, allOut: 900))
+
+    // Genuine local traffic is untouched.
+    let local = Counters(extIn: 10, extOut: 10, allIn: 900, allOut: 900)
+    #expect(local.clampedToExternal == local)
+}

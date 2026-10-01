@@ -31,12 +31,16 @@ public actor Collector {
 
     /// Traffic observed since the previous call, keyed by app bundle path (or process
     /// name for daemons). The first call returns nothing but establishes baselines.
-    public func sample(now: Date = Date()) -> [String: Counters] {
+    public func sample() -> [String: Counters] {
         let externalRows = Self.parse(Self.runNettop(externalOnly: true))
         let allRows = Self.parse(Self.runNettop(externalOnly: false))
 
         let previousSample = lastSampledAt
-        lastSampledAt = now
+        // Stamped after the snapshots, not before: the two nettop runs take ~80ms, and
+        // a process starting inside that window is already in this sample. Stamping
+        // first would leave it looking "newer than the last sample" on the next tick
+        // too, and its counter would be claimed twice.
+        lastSampledAt = Date()
 
         /// A process launched since the last sample has produced *all* of its traffic
         /// inside the window we are measuring, so its whole counter belongs to us.
@@ -48,9 +52,11 @@ public actor Collector {
         var usage: [String: Counters] = [:]
 
         for row in allRows {
+            let isFresh = startedSinceLastSample(row.pid)
             let previous = lastAll[row.pid]
             lastAll[row.pid] = row
-            let isFresh = startedSinceLastSample(row.pid)
+            // A reused pid is a different program, so its cached identity is wrong.
+            if isFresh { keyCache.removeValue(forKey: row.pid) }
             usage[key(for: row), default: .zero] += Counters(
                 allIn: Self.delta(current: row.received, last: previous?.received, isFreshProcess: isFresh),
                 allOut: Self.delta(current: row.sent, last: previous?.sent, isFreshProcess: isFresh)
@@ -58,9 +64,10 @@ public actor Collector {
         }
 
         for row in externalRows {
+            let isFresh = startedSinceLastSample(row.pid)
             let previous = lastExternal[row.pid]
             lastExternal[row.pid] = row
-            let isFresh = startedSinceLastSample(row.pid)
+            if isFresh { keyCache.removeValue(forKey: row.pid) }
             usage[key(for: row), default: .zero] += Counters(
                 extIn: Self.delta(current: row.received, last: previous?.received, isFreshProcess: isFresh),
                 extOut: Self.delta(current: row.sent, last: previous?.sent, isFreshProcess: isFresh)
@@ -72,7 +79,7 @@ public actor Collector {
         lastExternal = lastExternal.filter { livePIDs.contains($0.key) }
         keyCache = keyCache.filter { livePIDs.contains($0.key) }
 
-        return usage.filter { !$0.value.isZero }
+        return usage.compactMapValues { $0.isZero ? nil : $0.clampedToExternal }
     }
 
     private func key(for row: Row) -> String {

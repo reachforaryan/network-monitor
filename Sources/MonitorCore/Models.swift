@@ -26,6 +26,14 @@ public struct Counters: Sendable, Equatable {
         }
     }
 
+    /// External traffic is by definition part of all traffic, but the two scopes come
+    /// from two sequential nettop runs: a process that exits between them lands in one
+    /// snapshot and not the other, which would otherwise let "All traffic" report less
+    /// than "Internet" and make the number drop when the scope picker is flipped.
+    var clampedToExternal: Counters {
+        Counters(extIn: extIn, extOut: extOut, allIn: max(allIn, extIn), allOut: max(allOut, extOut))
+    }
+
     public static func += (lhs: inout Counters, rhs: Counters) {
         lhs.extIn += rhs.extIn
         lhs.extOut += rhs.extOut
