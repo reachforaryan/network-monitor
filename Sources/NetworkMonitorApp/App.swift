@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -35,6 +36,17 @@ private struct MenuBarContent: View {
             // A menu bar app isn't frontmost, so the new window needs bringing forward.
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+}
+
+/// Launch-at-login, which only works for a real bundle — under `swift run` there is
+/// nothing registrable, so the toggle reads as off and setting it does nothing.
+@MainActor
+enum LoginItem {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    static func set(_ enabled: Bool) {
+        try? enabled ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
     }
 }
 

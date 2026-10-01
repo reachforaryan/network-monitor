@@ -8,6 +8,8 @@ struct CompactView: View {
     @Bindable var engine: MonitorEngine
     let openDetail: () -> Void
 
+    @State private var launchAtLogin = LoginItem.isEnabled
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
@@ -98,9 +100,20 @@ struct CompactView: View {
             Spacer()
 
             Button("Details…", action: openDetail)
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+
+            Menu {
+                Toggle("Open at Login", isOn: $launchAtLogin)
+                Divider()
+                Button("Quit Network Monitor") { NSApplication.shared.terminate(nil) }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
         .font(.caption)
+        .onChange(of: launchAtLogin) { _, enabled in LoginItem.set(enabled) }
     }
 }
 
