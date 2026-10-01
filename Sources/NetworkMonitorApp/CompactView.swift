@@ -104,7 +104,12 @@ struct CompactView: View {
             Menu {
                 Toggle("Open at Login", isOn: $launchAtLogin)
                 Divider()
-                Button("Quit Network Monitor") { NSApplication.shared.terminate(nil) }
+                Button("Quit Network Monitor") {
+                    Task {
+                        await engine.flushBeforeQuit()
+                        NSApplication.shared.terminate(nil)
+                    }
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -113,7 +118,12 @@ struct CompactView: View {
             .fixedSize()
         }
         .font(.caption)
-        .onChange(of: launchAtLogin) { _, enabled in LoginItem.set(enabled) }
+        .onChange(of: launchAtLogin) { _, enabled in
+            LoginItem.set(enabled)
+            // Registration fails when running unbundled, so show what actually happened
+            // rather than leaving the toggle on against a login item that doesn't exist.
+            launchAtLogin = LoginItem.isEnabled
+        }
     }
 }
 

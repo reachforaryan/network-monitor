@@ -41,6 +41,8 @@ public actor Store {
 
         var pointer: OpaquePointer?
         guard sqlite3_open(url.path, &pointer) == SQLITE_OK, let pointer else {
+            // sqlite3_open allocates a handle even when it fails.
+            sqlite3_close(pointer)
             throw StoreError.sqlite("could not open \(url.path)")
         }
         connection = Connection(pointer: pointer)

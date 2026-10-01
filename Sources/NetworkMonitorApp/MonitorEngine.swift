@@ -38,36 +38,23 @@ final class MonitorEngine {
     private(set) var appSeries: [String: [UsagePoint]] = [:]
     private(set) var errorMessage: String?
 
+    /// Full list for the selected period, biggest first. Stored rather than computed:
+    /// the views read it many times per render, and recomputing merged a dictionary and
+    /// re-sorted it every time.
+    private(set) var apps: [AppUsage] = []
+    private(set) var topApps: [AppUsage] = []
+    private(set) var periodTotal: UInt64 = 0
+
     /// Usage already written to disk for the selected period and scope.
     private var stored: [AppUsage] = []
-    /// Sampled but not yet flushed, so displayed totals stay live between flushes.
-    private var pending: [String: Counters] = [:]
+    /// Sampled but not yet flushed, kept in minute buckets so a batch is written at the
+    /// time it was observed rather than the time it happened to be committed.
+    private var pending: [Date: [String: Counters]] = [:]
 
     private let collector = Collector()
     private var store: Store?
     private var tasks: [Task<Void, Never>] = []
-
-    /// Full list for the selected period, biggest first.
-    var apps: [AppUsage] {
-        var byKey = Dictionary(stored.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
-
-        for (key, counters) in pending {
-            let (received, sent) = counters.bytes(for: scope)
-            guard received + sent > 0 else { continue }
-            let existing = byKey[key]
-            byKey[key] = AppUsage(
-                key: key,
-                received: (existing?.received ?? 0) + received,
-                sent: (existing?.sent ?? 0) + sent
-            )
-        }
-
-        return byKey.values.sorted { $0.total > $1.total }
-    }
-
-    var topApps: [AppUsage] { Array(apps.prefix(Self.topAppCount)) }
-
-    var periodTotal: UInt64 { apps.reduce(0) { $0 + $1.total } }
+    private var lastPrunedDay: Date?
 
     var isLive: Bool { rate.total > 0 }
 
@@ -94,9 +81,10 @@ final class MonitorEngine {
         )
     }
 
-    func stop() {
-        tasks.forEach { $0.cancel() }
-        tasks = []
+    /// Writes out whatever has been sampled but not yet committed. Quitting without
+    /// this discards up to a flush interval of usage.
+    func flushBeforeQuit() async {
+        await flush()
     }
 
     // MARK: - Pipeline
@@ -104,6 +92,7 @@ final class MonitorEngine {
     private func openStore() async {
         do {
             let store = try await Store()
+            lastPrunedDay = Calendar.current.startOfDay(for: Date())
             try await store.prune()
             self.store = store
             await refresh()
@@ -126,10 +115,40 @@ final class MonitorEngine {
             rateHistory.removeFirst(rateHistory.count - Self.sparklineLength)
         }
 
+        let bucket = Self.minuteBucket(Date())
         for (key, counters) in sample {
-            pending[key, default: .zero] += counters
+            pending[bucket, default: [:]][key, default: .zero] += counters
         }
 
+        recomputeApps()
+    }
+
+    /// Floors to the minute so a flush lands in the bucket the traffic belongs to, not
+    /// the one it was written in — otherwise traffic sampled at 23:59:50 would count
+    /// toward the next day.
+    private static func minuteBucket(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 60).rounded(.down) * 60)
+    }
+
+    private func recomputeApps() {
+        var byKey = Dictionary(stored.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+
+        for batch in pending.values {
+            for (key, counters) in batch {
+                let (received, sent) = counters.bytes(for: scope)
+                guard received + sent > 0 else { continue }
+                let existing = byKey[key]
+                byKey[key] = AppUsage(
+                    key: key,
+                    received: (existing?.received ?? 0) + received,
+                    sent: (existing?.sent ?? 0) + sent
+                )
+            }
+        }
+
+        apps = byKey.values.sorted { $0.total > $1.total }
+        topApps = Array(apps.prefix(Self.topAppCount))
+        periodTotal = apps.reduce(0) { $0 + $1.total }
         assignColorSlots()
     }
 
@@ -152,15 +171,20 @@ final class MonitorEngine {
     private func flush() async {
         guard let store, !pending.isEmpty else { return }
 
-        let batch = pending
+        let batches = pending
         pending = [:]
 
         do {
-            try await store.flush(batch)
+            for (bucket, batch) in batches {
+                try await store.flush(batch, at: bucket)
+            }
+            try await pruneIfDayChanged(store)
         } catch {
-            // Keep the batch rather than lose the usage it represents.
-            for (key, counters) in batch {
-                pending[key, default: .zero] += counters
+            // Keep the batches rather than lose the usage they represent.
+            for (bucket, batch) in batches {
+                for (key, counters) in batch {
+                    pending[bucket, default: [:]][key, default: .zero] += counters
+                }
             }
             errorMessage = "Could not save usage: \(error)"
             return
@@ -170,7 +194,17 @@ final class MonitorEngine {
         await refresh()
     }
 
+    /// Retention has to be enforced while the app runs, not only at launch: as a login
+    /// item this process can stay up for weeks, and the minute table grows all the while.
+    private func pruneIfDayChanged(_ store: Store) async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        guard lastPrunedDay != today else { return }
+        lastPrunedDay = today
+        try await store.prune()
+    }
+
     private func scheduleRefresh() {
+        recomputeApps()
         Task { await refresh() }
     }
 
@@ -180,14 +214,25 @@ final class MonitorEngine {
         let scope = scope
 
         do {
-            stored = try await store.usage(period: period, scope: scope)
-            totalSeries = try await store.totalSeries(period: period, scope: scope)
-            assignColorSlots()
-            appSeries = try await store.appSeries(
+            let stored = try await store.usage(period: period, scope: scope)
+            let totalSeries = try await store.totalSeries(period: period, scope: scope)
+
+            // Another refresh may have been queued while those awaits were in flight;
+            // its results are the current ones, so drop these rather than interleave
+            // a chart and a list from different periods.
+            guard period == self.period, scope == self.scope else { return }
+
+            self.stored = stored
+            self.totalSeries = totalSeries
+            recomputeApps()
+
+            let appSeries = try await store.appSeries(
                 keys: topApps.map(\.key),
                 period: period,
                 scope: scope
             )
+            guard period == self.period, scope == self.scope else { return }
+            self.appSeries = appSeries
         } catch {
             errorMessage = "Could not read history: \(error)"
         }
