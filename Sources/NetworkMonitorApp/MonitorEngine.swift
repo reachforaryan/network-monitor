@@ -96,6 +96,17 @@ final class MonitorEngine {
 
     var isLive: Bool { rate.total > 0 }
 
+    /// An app's share of everything transferred this period.
+    ///
+    /// Measured against the period total rather than against the largest app: dividing
+    /// by the leader made the top row read 100% by definition, which told you only that
+    /// it was the top row, while everything below answered "compared to the biggest" —
+    /// a question nobody was asking of a number sitting under a total.
+    func share(of app: AppUsage) -> Double {
+        guard periodTotal > 0 else { return 0 }
+        return Double(app.total) / Double(periodTotal)
+    }
+
     func start() {
         guard tasks.isEmpty else { return }
 

@@ -110,11 +110,9 @@ struct DetailView: View {
                             y: .value("Bytes", row.bytes),
                             series: .value("Series", row.series)
                         )
-                        .interpolationMethod(.linear)
+                        .interpolationMethod(DS.curve)
                         .foregroundStyle(by: .value("Series", row.series))
-                        .lineStyle(
-                            StrokeStyle(lineWidth: row.series == Self.totalSeriesName ? 2 : 1.5)
-                        )
+                        .lineStyle(DS.lineStyle(width: row.series == Self.totalSeriesName ? 2 : 1.5))
                     }
 
                     if let hovered, let marker = nearestPoint(to: hovered) {
@@ -150,9 +148,14 @@ struct DetailView: View {
                 }
                 .chartLegend(.hidden)
                 .frame(height: 210)
-                .padding(10)
-                .background(DS.panel)
-                .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous).fill(DS.panel)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous)
+                        .strokeBorder(DS.border, lineWidth: 1)
+                )
 
                 legend(data)
             }
@@ -201,10 +204,15 @@ struct DetailView: View {
                 }
             }
         }
-        .padding(8)
+        .padding(9)
         .frame(maxWidth: 230)
-        .background(DS.ground)
-        .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusControl, style: .continuous).fill(DS.ground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.radiusControl, style: .continuous)
+                .strokeBorder(DS.border, lineWidth: 1)
+        )
     }
 
     // MARK: - App list
@@ -242,7 +250,7 @@ struct DetailView: View {
                     ForEach(Array(engine.apps.enumerated()), id: \.element.id) { index, app in
                         DetailRow(
                             app: app,
-                            share: Double(app.total) / Double(max(engine.apps.first?.total ?? 1, 1)),
+                            share: engine.share(of: app),
                             color: DS.seriesColor(slot: engine.colorSlots[app.key])
                         )
                         .background(index.isMultiple(of: 2) ? DS.ground : DS.panel.opacity(0.6))
@@ -250,7 +258,11 @@ struct DetailView: View {
                 }
             }
             .frame(minHeight: 130)
-            .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous)
+                    .strokeBorder(DS.border, lineWidth: 1)
+            )
         }
     }
 
@@ -276,11 +288,16 @@ struct DetailView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .frame(width: 190)
-        .background(DS.panel)
-        .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusControl, style: .continuous).fill(DS.panel)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.radiusControl, style: .continuous)
+                .strokeBorder(DS.border, lineWidth: 1)
+        )
     }
 
     // MARK: - Series plumbing

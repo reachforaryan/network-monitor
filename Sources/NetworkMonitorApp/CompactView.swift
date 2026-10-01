@@ -11,26 +11,20 @@ struct CompactView: View {
     @State private var showConfig = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
-            TabRow(options: Period.allCases, selection: $engine.period) { $0.label }
-
-            totalPanel
-
-            // The count is only known for the scope currently being queried, so it is
-            // shown on the active tab rather than guessed for both.
-            TabRow(
-                options: Scope.allCases,
-                selection: $engine.scope,
-                badge: { $0 == engine.scope ? engine.apps.count : nil }
-            ) { $0 == .internet ? "NET" : "ALL" }
+            VStack(alignment: .leading, spacing: 8) {
+                TabRow(options: Period.allCases, selection: $engine.period) { $0.label }
+                totalPanel
+            }
 
             topApps
 
-            TickRuler()
-
-            footer
+            VStack(spacing: 10) {
+                TickRuler()
+                footer
+            }
         }
         .padding(12)
         .frame(width: 310)
@@ -66,14 +60,17 @@ struct CompactView: View {
 
     private var totalPanel: some View {
         Panel {
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     SectionLabel("TOTAL_USAGE")
                     Spacer()
-                    Text(engine.period.headline.uppercased())
-                        .font(DS.mono(8))
-                        .tracking(1)
-                        .foregroundStyle(DS.inkMuted)
+                    // Scope sits here because it qualifies this number, not just the
+                    // list. The period is already named by the tabs above, so the
+                    // old "TODAY" caption was repeating the selected tab back.
+                    TabRow(options: Scope.allCases, selection: $engine.scope, compact: true) {
+                        $0 == .internet ? "NET" : "ALL"
+                    }
+                    .frame(width: 92)
                 }
 
                 HStack(alignment: .firstTextBaseline) {
@@ -108,8 +105,8 @@ struct CompactView: View {
             HStack {
                 SectionLabel("TOP_APPS")
                 Spacer()
-                if engine.apps.count > engine.topApps.count {
-                    Text("[\(engine.topApps.count)/\(engine.apps.count)]")
+                if engine.unfilteredCount > engine.topApps.count {
+                    Text("[\(engine.topApps.count)/\(engine.unfilteredCount)]")
                         .font(DS.mono(8, weight: .bold))
                         .foregroundStyle(DS.inkMuted)
                 }
@@ -121,12 +118,11 @@ struct CompactView: View {
                     .foregroundStyle(DS.inkMuted)
                     .padding(.vertical, 8)
             } else {
-                let largest = engine.topApps.first?.total ?? 1
                 VStack(spacing: 7) {
                     ForEach(engine.topApps) { app in
                         AppRow(
                             app: app,
-                            share: largest > 0 ? Double(app.total) / Double(largest) : 0,
+                            share: engine.share(of: app),
                             color: DS.seriesColor(slot: engine.colorSlots[app.key])
                         )
                     }
@@ -182,15 +178,23 @@ private struct AppRow: View {
 
                 HStack(spacing: 6) {
                     HatchedBar(fraction: share, height: 7, tint: color)
-                    Text("\(Int((share * 100).rounded()))%")
+                    Text(percentage)
                         .font(DS.mono(8))
                         .foregroundStyle(DS.inkMuted)
-                        .frame(width: 26, alignment: .trailing)
+                        .frame(width: 30, alignment: .trailing)
                 }
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(app.displayName), \(formatBytes(app.total))")
+        .accessibilityLabel("\(app.displayName), \(formatBytes(app.total)), \(percentage) of total")
+    }
+
+    /// Rounding a real but tiny share to "0%" reads as "used nothing", which is a
+    /// different claim from "used a little".
+    private var percentage: String {
+        let percent = share * 100
+        if percent > 0, percent < 1 { return "<1%" }
+        return "\(Int(percent.rounded()))%"
     }
 }
 
@@ -206,13 +210,17 @@ private struct Sparkline: View {
                 y: .value("Bytes per second", value),
                 width: .fixed(3)
             )
-            .foregroundStyle(value > 0 ? DS.ink : DS.border)
+            .foregroundStyle(value > 0 ? DS.ink : DS.hairline)
+            .cornerRadius(1.5)
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartYScale(domain: 0...yMax)
         .chartLegend(.hidden)
-        .frame(height: 30)
+        .frame(height: 24)
+        .chartPlotStyle {
+            $0.clipShape(RoundedRectangle(cornerRadius: DS.radiusMark, style: .continuous))
+        }
     }
 
     /// Left-padded so the newest sample stays pinned to the right edge instead of the
