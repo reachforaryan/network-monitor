@@ -126,7 +126,9 @@ public struct UsagePoint: Sendable, Identifiable, Equatable {
 }
 
 public func formatBytes(_ bytes: UInt64) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    // ByteCountFormatter spells zero as "Zero KB", which reads badly on an axis.
+    guard bytes > 0 else { return "0 KB" }
+    return ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
 }
 
 public func formatRate(_ bytesPerSecond: Double) -> String {
