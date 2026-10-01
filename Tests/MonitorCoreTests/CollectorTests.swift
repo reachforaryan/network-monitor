@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import MonitorCore
@@ -63,4 +64,14 @@ import Testing
     let daemon = AppUsage(key: "syslogd", received: 1, sent: 2)
     #expect(daemon.displayName == "syslogd")
     #expect(daemon.bundlePath == nil)
+}
+
+@Test func deltaCountsTheWholeCounterForAProcessNewerThanTheLastSample() {
+    // All of a just-launched process's traffic happened inside our window.
+    #expect(Collector.delta(current: 25_000_000, last: nil, countsFromZero: true) == 25_000_000)
+}
+
+@Test func startTimeResolvesForALiveProcess() throws {
+    let started = try #require(Collector.startTime(pid: ProcessInfo.processInfo.processIdentifier))
+    #expect(started <= Date())
 }

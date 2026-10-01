@@ -25,32 +25,45 @@ public actor Collector {
     private var lastExternal: [Int32: Row] = [:]
     private var lastAll: [Int32: Row] = [:]
     private var keyCache: [Int32: String] = [:]
+    private var lastSampledAt: Date?
 
     public init() {}
 
     /// Traffic observed since the previous call, keyed by app bundle path (or process
     /// name for daemons). The first call returns nothing but establishes baselines.
-    public func sample() -> [String: Counters] {
+    public func sample(now: Date = Date()) -> [String: Counters] {
         let externalRows = Self.parse(Self.runNettop(externalOnly: true))
         let allRows = Self.parse(Self.runNettop(externalOnly: false))
+
+        let previousSample = lastSampledAt
+        lastSampledAt = now
+
+        /// A process launched since the last sample has produced *all* of its traffic
+        /// inside the window we are measuring, so its whole counter belongs to us.
+        func startedSinceLastSample(_ pid: Int32) -> Bool {
+            guard let previousSample, let started = Self.startTime(pid: pid) else { return false }
+            return started > previousSample
+        }
 
         var usage: [String: Counters] = [:]
 
         for row in allRows {
             let previous = lastAll[row.pid]
             lastAll[row.pid] = row
+            let isNew = previous == nil && startedSinceLastSample(row.pid)
             usage[key(for: row), default: .zero] += Counters(
-                allIn: Self.delta(current: row.received, last: previous?.received),
-                allOut: Self.delta(current: row.sent, last: previous?.sent)
+                allIn: Self.delta(current: row.received, last: previous?.received, countsFromZero: isNew),
+                allOut: Self.delta(current: row.sent, last: previous?.sent, countsFromZero: isNew)
             )
         }
 
         for row in externalRows {
             let previous = lastExternal[row.pid]
             lastExternal[row.pid] = row
+            let isNew = previous == nil && startedSinceLastSample(row.pid)
             usage[key(for: row), default: .zero] += Counters(
-                extIn: Self.delta(current: row.received, last: previous?.received),
-                extOut: Self.delta(current: row.sent, last: previous?.sent)
+                extIn: Self.delta(current: row.received, last: previous?.received, countsFromZero: isNew),
+                extOut: Self.delta(current: row.sent, last: previous?.sent, countsFromZero: isNew)
             )
         }
 
@@ -74,16 +87,29 @@ public actor Collector {
 
     // MARK: - Pure helpers
 
-    /// nettop counters are cumulative since process start, so a pid we have never seen
-    /// contributes nothing on its first tick.
+    /// nettop counters are cumulative since process start. For a pid we have not seen
+    /// before, the whole counter only belongs to this window if the process itself is
+    /// newer than our last sample — otherwise it is history we must not claim.
     ///
-    /// ponytail: first-sight-is-zero undercounts traffic a process made before we
-    /// noticed it. Counting the raw value instead would fabricate a large spike, which
-    /// is the worse error. Not worth reconciling more precisely.
-    static func delta(current: UInt64, last: UInt64?) -> UInt64 {
-        guard let last else { return 0 }
+    /// ponytail: a process that both starts and exits between two samples is still
+    /// invisible. Catching those needs event-driven accounting (NetworkExtension), not
+    /// polling; the 2s window keeps the loss small.
+    static func delta(current: UInt64, last: UInt64?, countsFromZero: Bool = false) -> UInt64 {
+        guard let last else { return countsFromZero ? current : 0 }
         // A drop means pid reuse or a counter reset, so `current` is all new traffic.
         return current >= last ? current - last : current
+    }
+
+    /// Process start time via libproc. No entitlement needed.
+    static func startTime(pid: Int32) -> Date? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        // PROC_PIDTBSDINFO (3) isn't exposed to Swift.
+        guard proc_pidinfo(pid, 3, 0, &info, size) == size else { return nil }
+        return Date(
+            timeIntervalSince1970: Double(info.pbi_start_tvsec)
+                + Double(info.pbi_start_tvusec) / 1_000_000
+        )
     }
 
     /// Parses `nettop -P -L 1 -J bytes_in,bytes_out -x` output, whose rows look like
