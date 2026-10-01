@@ -62,7 +62,7 @@ struct DetailView: View {
             Panel {
                 VStack(alignment: .leading, spacing: 5) {
                     SectionLabel("RECEIVED")
-                    Text(formatBytes(engine.apps.reduce(0) { $0 + $1.received }))
+                    Text(formatBytes(engine.periodReceived))
                         .font(DS.mono(15, weight: .bold))
                         .foregroundStyle(DS.inkSecondary)
                 }
@@ -71,7 +71,7 @@ struct DetailView: View {
             Panel {
                 VStack(alignment: .leading, spacing: 5) {
                     SectionLabel("SENT")
-                    Text(formatBytes(engine.apps.reduce(0) { $0 + $1.sent }))
+                    Text(formatBytes(engine.periodSent))
                         .font(DS.mono(15, weight: .bold))
                         .foregroundStyle(DS.inkSecondary)
                 }
@@ -211,12 +211,30 @@ struct DetailView: View {
 
     private var appList: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack {
+            HStack(spacing: 10) {
                 SectionLabel("ALL_APPS")
+
+                // Shows what is hidden rather than presenting a filtered list as the
+                // whole picture.
+                Text(
+                    engine.apps.count == engine.unfilteredCount
+                        ? "[\(engine.apps.count)]"
+                        : "[\(engine.apps.count)/\(engine.unfilteredCount)]"
+                )
+                .font(DS.mono(8, weight: .bold))
+                .foregroundStyle(DS.inkMuted)
+
                 Spacer()
-                Text("[\(engine.apps.count)]")
-                    .font(DS.mono(8, weight: .bold))
-                    .foregroundStyle(DS.inkMuted)
+
+                searchField
+
+                BracketButton(
+                    title: engine.filter.appsOnly ? "APPS_ONLY" : "ALL_PROCS",
+                    emphasized: engine.filter.appsOnly
+                ) {
+                    engine.filter.appsOnly.toggle()
+                }
+                .frame(width: 118)
             }
 
             ScrollView {
@@ -234,6 +252,35 @@ struct DetailView: View {
             .frame(minHeight: 130)
             .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 5) {
+            Text(">")
+                .font(DS.mono(9, weight: .bold))
+                .foregroundStyle(DS.inkMuted)
+
+            TextField("SEARCH", text: $engine.filter.search)
+                .textFieldStyle(.plain)
+                .font(DS.mono(9))
+                .foregroundStyle(DS.ink)
+
+            if !engine.filter.search.isEmpty {
+                Button {
+                    engine.filter.search = ""
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 7))
+                        .foregroundStyle(DS.inkMuted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .frame(width: 190)
+        .background(DS.panel)
+        .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
     }
 
     // MARK: - Series plumbing

@@ -30,6 +30,20 @@ final class MonitorEngine {
         didSet { if scope != oldValue { scheduleRefresh() } }
     }
 
+    /// Narrows the lists and the charted apps. Does not change what is recorded, and
+    /// deliberately does not change `periodTotal` — see `recomputeApps()`.
+    var filter: UsageFilter = .none {
+        didSet {
+            guard filter != oldValue else { return }
+            Self.persist(filter)
+            recomputeApps()
+        }
+    }
+
+    /// How many apps had traffic before filtering, so the UI can show "12 of 47" rather
+    /// than quietly presenting a filtered list as the whole picture.
+    private(set) var unfilteredCount = 0
+
     private(set) var rate = Rate()
     private(set) var rateHistory: [Rate] = []
     /// Palette slot per app, so an app keeps its color as ranks swap.
@@ -43,7 +57,12 @@ final class MonitorEngine {
     /// re-sorted it every time.
     private(set) var apps: [AppUsage] = []
     private(set) var topApps: [AppUsage] = []
+
+    /// Period totals stay unfiltered so the three summary figures always agree with each
+    /// other and with what the machine actually transferred.
     private(set) var periodTotal: UInt64 = 0
+    private(set) var periodReceived: UInt64 = 0
+    private(set) var periodSent: UInt64 = 0
 
     /// Usage already written to disk for the selected period and scope.
     private var stored: [AppUsage] = []
@@ -55,6 +74,25 @@ final class MonitorEngine {
     private var store: Store?
     private var tasks: [Task<Void, Never>] = []
     private var lastPrunedDay: Date?
+
+    private enum Key {
+        static let appsOnly = "filter.appsOnly"
+        static let minimumBytes = "filter.minimumBytes"
+    }
+
+    init() {
+        // Search is deliberately not restored — a forgotten query would look like an
+        // empty list on next launch.
+        filter = UsageFilter(
+            appsOnly: UserDefaults.standard.bool(forKey: Key.appsOnly),
+            minimumBytes: UInt64(UserDefaults.standard.integer(forKey: Key.minimumBytes))
+        )
+    }
+
+    private static func persist(_ filter: UsageFilter) {
+        UserDefaults.standard.set(filter.appsOnly, forKey: Key.appsOnly)
+        UserDefaults.standard.set(Int(filter.minimumBytes), forKey: Key.minimumBytes)
+    }
 
     var isLive: Bool { rate.total > 0 }
 
@@ -146,9 +184,17 @@ final class MonitorEngine {
             }
         }
 
-        apps = byKey.values.sorted { $0.total > $1.total }
+        let everything = byKey.values.sorted { $0.total > $1.total }
+
+        // The headline totals stay unfiltered on purpose: hiding daemons must not make
+        // the machine look like it used less than it did.
+        unfilteredCount = everything.count
+        periodTotal = everything.reduce(0) { $0 + $1.total }
+        periodReceived = everything.reduce(0) { $0 + $1.received }
+        periodSent = everything.reduce(0) { $0 + $1.sent }
+
+        apps = filter.apply(to: everything)
         topApps = Array(apps.prefix(Self.topAppCount))
-        periodTotal = apps.reduce(0) { $0 + $1.total }
         assignColorSlots()
     }
 
