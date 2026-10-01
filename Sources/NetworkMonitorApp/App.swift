@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let engine = MonitorEngine()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DS.registerFonts()
         engine.start()
     }
 }

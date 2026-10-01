@@ -11,8 +11,12 @@ VERSION="1.0"
 swift build -c release
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/NetworkMonitorApp "$APP/Contents/MacOS/NetworkMonitor"
+
+# The bundled fonts live in SwiftPM's resource bundle, which Bundle.module resolves
+# relative to the executable — without this the app falls back to a system face.
+cp -R .build/release/NetworkMonitor_NetworkMonitorApp.bundle "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

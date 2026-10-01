@@ -2,133 +2,159 @@ import Charts
 import MonitorCore
 import SwiftUI
 
-/// The menu bar dropdown. Deliberately small: one headline total, the live rate, and
-/// the five biggest apps. Everything else lives in the detail window.
+/// The menu bar dropdown. Deliberately small: one headline total, the live rate, and the
+/// five biggest apps. Filters and settings live behind CONFIG so this panel stays calm.
 struct CompactView: View {
     @Bindable var engine: MonitorEngine
     let openDetail: () -> Void
 
-    @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var showConfig = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             header
-            liveRate
+
+            TabRow(options: Period.allCases, selection: $engine.period) { $0.label }
+
+            totalPanel
+
+            // The count is only known for the scope currently being queried, so it is
+            // shown on the active tab rather than guessed for both.
+            TabRow(
+                options: Scope.allCases,
+                selection: $engine.scope,
+                badge: { $0 == engine.scope ? engine.apps.count : nil }
+            ) { $0 == .internet ? "NET" : "ALL" }
+
             topApps
-            Divider()
+
+            TickRuler()
+
             footer
         }
-        .padding(14)
-        .frame(width: 290)
+        .padding(12)
+        .frame(width: 310)
+        .background(DS.ground)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(engine.period.headline)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(formatBytes(engine.periodTotal))
-                    .font(.system(size: 22, weight: .semibold))
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NET_CTRL // TRAFFIC")
+                    .font(DS.display(11))
+                    .tracking(0.5)
+                    .foregroundStyle(DS.ink)
+                Text("PER-PROCESS BANDWIDTH")
+                    .font(DS.mono(8))
+                    .tracking(1)
+                    .foregroundStyle(DS.inkSecondary)
             }
 
-            Picker("Period", selection: $engine.period) {
-                ForEach(Period.allCases, id: \.self) { Text($0.label).tag($0) }
+            Spacer()
+
+            HStack(spacing: 5) {
+                Rectangle()
+                    .fill(engine.isLive ? DS.live : DS.inkMuted)
+                    .frame(width: 5, height: 5)
+                Text(engine.isLive ? "LIVE" : "IDLE")
+                    .font(DS.mono(8, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(engine.isLive ? DS.ink : DS.inkMuted)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
         }
     }
 
-    private var liveRate: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(engine.isLive ? Color.green : Color.secondary.opacity(0.4))
-                    .frame(width: 6, height: 6)
-                    .accessibilityHidden(true)
+    private var totalPanel: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    SectionLabel("TOTAL_USAGE")
+                    Spacer()
+                    Text(engine.period.headline.uppercased())
+                        .font(DS.mono(8))
+                        .tracking(1)
+                        .foregroundStyle(DS.inkMuted)
+                }
 
-                Label(formatRate(engine.rate.received), systemImage: "arrow.down")
-                Label(formatRate(engine.rate.sent), systemImage: "arrow.up")
-                Spacer()
+                HStack(alignment: .firstTextBaseline) {
+                    Text(formatBytes(engine.periodTotal))
+                        .font(DS.display(19))
+                        .foregroundStyle(DS.ink)
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        rateLine("↓", formatRate(engine.rate.received))
+                        rateLine("↑", formatRate(engine.rate.sent))
+                    }
+                }
+
+                Sparkline(history: engine.rateHistory)
+                    .accessibilityLabel("Throughput over the last minute")
             }
-            .font(.system(.caption, design: .rounded))
-            .monospacedDigit()
-            .labelStyle(.titleAndIcon)
-
-            Sparkline(history: engine.rateHistory)
-                .frame(height: 30)
-                .accessibilityLabel("Throughput over the last minute")
         }
+    }
+
+    private func rateLine(_ arrow: String, _ value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(arrow).foregroundStyle(DS.inkMuted)
+            Text(value).foregroundStyle(DS.inkSecondary)
+        }
+        .font(DS.mono(9))
     }
 
     private var topApps: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Top apps")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+            HStack {
+                SectionLabel("TOP_APPS")
+                Spacer()
+                if engine.apps.count > engine.topApps.count {
+                    Text("[\(engine.topApps.count)/\(engine.apps.count)]")
+                        .font(DS.mono(8, weight: .bold))
+                        .foregroundStyle(DS.inkMuted)
+                }
+            }
 
             if engine.topApps.isEmpty {
-                Text(engine.errorMessage ?? "No traffic yet")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
+                Text(engine.errorMessage?.uppercased() ?? "// NO TRAFFIC RECORDED")
+                    .font(DS.mono(9))
+                    .foregroundStyle(DS.inkMuted)
+                    .padding(.vertical, 8)
             } else {
                 let largest = engine.topApps.first?.total ?? 1
-                ForEach(engine.topApps) { app in
-                    AppRow(
-                        app: app,
-                        share: largest > 0 ? Double(app.total) / Double(largest) : 0,
-                        color: Theme.color(slot: engine.colorSlots[app.key])
-                    )
+                VStack(spacing: 7) {
+                    ForEach(engine.topApps) { app in
+                        AppRow(
+                            app: app,
+                            share: largest > 0 ? Double(app.total) / Double(largest) : 0,
+                            color: DS.seriesColor(slot: engine.colorSlots[app.key])
+                        )
+                    }
                 }
             }
         }
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            Picker("Scope", selection: $engine.scope) {
-                ForEach(Scope.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .help("Internet excludes loopback and local-only traffic")
+        HStack(spacing: 6) {
+            BracketButton(title: "Details", action: openDetail)
 
-            Spacer()
-
-            Button("Details…", action: openDetail)
-
-            Menu {
-                Toggle("Open at Login", isOn: $launchAtLogin)
-                Divider()
-                Button("Quit Network Monitor") {
-                    Task {
-                        await engine.flushBeforeQuit()
-                        NSApplication.shared.terminate(nil)
-                    }
+            BracketButton(title: "Config", icon: "gearshape") { showConfig.toggle() }
+                .popover(isPresented: $showConfig, arrowEdge: .bottom) {
+                    ConfigView(engine: engine)
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
+
+            BracketButton(title: "Quit") {
+                Task {
+                    await engine.flushBeforeQuit()
+                    NSApplication.shared.terminate(nil)
+                }
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-        .font(.caption)
-        .onChange(of: launchAtLogin) { _, enabled in
-            LoginItem.set(enabled)
-            // Registration fails when running unbundled, so show what actually happened
-            // rather than leaving the toggle on against a login item that doesn't exist.
-            launchAtLogin = LoginItem.isEnabled
         }
     }
 }
 
-/// One app in the top-five list: identity on the left, magnitude on the right, with a
-/// thin bar carrying the comparison.
+/// One app in the top-five list: identity, magnitude, and a hatched share bar.
 private struct AppRow: View {
     let app: AppUsage
     let share: Double
@@ -136,26 +162,31 @@ private struct AppRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(nsImage: AppIcon.image(for: app))
-                .resizable()
-                .frame(width: 16, height: 16)
+            IconTile(app: app)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Text(app.displayName)
+                    Text(app.displayName.uppercased())
+                        .font(DS.mono(10, weight: .bold))
+                        .tracking(0.3)
+                        .foregroundStyle(DS.ink)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Text(formatBytes(app.total))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption)
 
-                Capsule()
-                    .fill(color)
-                    .frame(width: nil, height: 3)
-                    .scaleEffect(x: max(share, 0.01), y: 1, anchor: .leading)
+                    Spacer(minLength: 4)
+
+                    Text(formatBytes(app.total))
+                        .font(DS.mono(9))
+                        .foregroundStyle(DS.inkSecondary)
+                }
+
+                HStack(spacing: 6) {
+                    HatchedBar(fraction: share, height: 7, tint: color)
+                    Text("\(Int((share * 100).rounded()))%")
+                        .font(DS.mono(8))
+                        .foregroundStyle(DS.inkMuted)
+                        .frame(width: 26, alignment: .trailing)
+                }
             }
         }
         .accessibilityElement(children: .combine)
@@ -163,39 +194,38 @@ private struct AppRow: View {
     }
 }
 
-/// Last minute of throughput. One series, so it needs no legend — the label above
-/// names it.
+/// Last minute of throughput as discrete bars — one per sample, newest at the right.
+/// Blocky rather than smoothed, to match everything around it.
 private struct Sparkline: View {
     let history: [MonitorEngine.Rate]
 
     var body: some View {
-        Chart(Array(history.enumerated()), id: \.offset) { index, rate in
-            AreaMark(x: .value("Sample", index), y: .value("Bytes per second", rate.total))
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(
-                    .linearGradient(
-                        colors: [Theme.total.opacity(0.28), Theme.total.opacity(0.02)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-
-            LineMark(x: .value("Sample", index), y: .value("Bytes per second", rate.total))
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(Theme.total)
-                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+        Chart(Array(padded.enumerated()), id: \.offset) { index, value in
+            BarMark(
+                x: .value("Sample", index),
+                y: .value("Bytes per second", value),
+                width: .fixed(3)
+            )
+            .foregroundStyle(value > 0 ? DS.ink : DS.border)
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
-        .chartXScale(domain: 0...Double(max(MonitorEngine.sparklineLength - 1, 1)))
         .chartYScale(domain: 0...yMax)
-        .chartPlotStyle { $0.background(Theme.grid.opacity(0.35)).clipShape(.rect(cornerRadius: 4)) }
         .chartLegend(.hidden)
+        .frame(height: 30)
     }
 
-    /// A floor keeps an idle connection from drawing noise as a full-height mountain.
+    /// Left-padded so the newest sample stays pinned to the right edge instead of the
+    /// chart stretching while history fills up.
+    private var padded: [Double] {
+        let values = history.map(\.total)
+        let missing = max(0, MonitorEngine.sparklineLength - values.count)
+        return Array(repeating: 0, count: missing) + values
+    }
+
+    /// A floor keeps idle background chatter from drawing as a full-height mountain.
     private var yMax: Double {
-        max(history.map(\.total).max() ?? 0, 64_000)
+        max(padded.max() ?? 0, 64_000)
     }
 }
 

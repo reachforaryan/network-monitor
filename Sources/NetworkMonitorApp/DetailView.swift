@@ -2,89 +2,105 @@ import Charts
 import MonitorCore
 import SwiftUI
 
-/// The full picture: throughput over time for the whole machine and the top apps,
-/// with every app that used the network listed below.
+/// The full picture: throughput over time for the machine and its top apps, with every
+/// app that used the network listed below.
 struct DetailView: View {
     @Bindable var engine: MonitorEngine
     @State private var hovered: Date?
 
-    private static let totalSeriesName = "All traffic"
+    private static let totalSeriesName = "ALL TRAFFIC"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            controls
+        VStack(alignment: .leading, spacing: 14) {
+            header
             summary
             chart
             appList
         }
-        .padding(20)
-        .frame(minWidth: 620, minHeight: 520)
+        .padding(16)
+        .frame(minWidth: 680, minHeight: 540)
+        .background(DS.ground)
     }
 
-    private var controls: some View {
-        HStack(spacing: 12) {
-            Picker("Period", selection: $engine.period) {
-                ForEach(Period.allCases, id: \.self) { Text($0.label).tag($0) }
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NET_CTRL // ANALYSIS")
+                    .font(DS.display(13))
+                    .foregroundStyle(DS.ink)
+                Text("PER-PROCESS BANDWIDTH HISTORY")
+                    .font(DS.mono(8))
+                    .tracking(1)
+                    .foregroundStyle(DS.inkSecondary)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-
-            Picker("Scope", selection: $engine.scope) {
-                ForEach(Scope.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .help("Internet excludes loopback and local-only traffic")
 
             Spacer()
 
-            if let errorMessage = engine.errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            // Wide gap so the two selectors don't read as one five-option row.
+            HStack(spacing: 18) {
+                TabRow(options: Period.allCases, selection: $engine.period) { $0.label }
+                    .frame(width: 230)
+                TabRow(options: Scope.allCases, selection: $engine.scope) {
+                    $0 == .internet ? "NET" : "ALL"
+                }
+                .frame(width: 130)
             }
         }
     }
 
     private var summary: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 20) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(engine.period.headline)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(formatBytes(engine.periodTotal))
-                    .font(.system(size: 28, weight: .semibold))
+        HStack(spacing: 10) {
+            Panel {
+                VStack(alignment: .leading, spacing: 5) {
+                    SectionLabel("TOTAL_\(engine.period.label)")
+                    Text(formatBytes(engine.periodTotal))
+                        .font(DS.display(22))
+                        .foregroundStyle(DS.ink)
+                }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Label(formatBytes(engine.apps.reduce(0) { $0 + $1.received }), systemImage: "arrow.down")
-                Label(formatBytes(engine.apps.reduce(0) { $0 + $1.sent }), systemImage: "arrow.up")
+            Panel {
+                VStack(alignment: .leading, spacing: 5) {
+                    SectionLabel("RECEIVED")
+                    Text(formatBytes(engine.apps.reduce(0) { $0 + $1.received }))
+                        .font(DS.mono(15, weight: .bold))
+                        .foregroundStyle(DS.inkSecondary)
+                }
             }
-            .font(.caption)
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
+
+            Panel {
+                VStack(alignment: .leading, spacing: 5) {
+                    SectionLabel("SENT")
+                    Text(formatBytes(engine.apps.reduce(0) { $0 + $1.sent }))
+                        .font(DS.mono(15, weight: .bold))
+                        .foregroundStyle(DS.inkSecondary)
+                }
+            }
+
+            if let errorMessage = engine.errorMessage {
+                Panel {
+                    Text(errorMessage.uppercased())
+                        .font(DS.mono(8))
+                        .foregroundStyle(DS.inkMuted)
+                        .lineLimit(2)
+                }
+            }
         }
     }
 
     // MARK: - Chart
 
     private var chart: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Throughput per \(engine.period.grainLabel)")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 7) {
+            SectionLabel("THROUGHPUT_PER_\(engine.period.grainLabel)")
 
             if engine.totalSeries.isEmpty {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Theme.grid.opacity(0.3))
-                    .frame(height: 220)
-                    .overlay {
-                        Text("No history for this period yet")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                Panel {
+                    Text("// NO HISTORY FOR THIS PERIOD YET")
+                        .font(DS.mono(9))
+                        .foregroundStyle(DS.inkMuted)
+                        .frame(maxWidth: .infinity, minHeight: 200)
+                }
             } else {
                 let data = chartData
                 Chart {
@@ -94,20 +110,17 @@ struct DetailView: View {
                             y: .value("Bytes", row.bytes),
                             series: .value("Series", row.series)
                         )
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(.linear)
                         .foregroundStyle(by: .value("Series", row.series))
                         .lineStyle(
-                            StrokeStyle(
-                                lineWidth: row.series == Self.totalSeriesName ? 2 : 1.5,
-                                lineCap: .round
-                            )
+                            StrokeStyle(lineWidth: row.series == Self.totalSeriesName ? 2 : 1.5)
                         )
                     }
 
                     if let hovered, let marker = nearestPoint(to: hovered) {
                         RuleMark(x: .value("Time", marker.date))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                            .foregroundStyle(Theme.grid)
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                            .foregroundStyle(DS.inkMuted)
                             .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
                                 tooltip(at: marker.date, data: data)
                             }
@@ -117,65 +130,94 @@ struct DetailView: View {
                 .chartXSelection(value: $hovered)
                 .chartYAxis {
                     AxisMarks { value in
-                        AxisGridLine().foregroundStyle(Theme.grid)
+                        AxisGridLine().foregroundStyle(DS.grid)
                         AxisValueLabel {
                             if let bytes = value.as(Double.self) {
                                 Text(formatBytes(UInt64(max(0, bytes))))
+                                    .font(DS.mono(8))
+                                    .foregroundStyle(DS.inkMuted)
                             }
                         }
                     }
                 }
                 .chartXAxis {
                     AxisMarks { _ in
-                        AxisGridLine().foregroundStyle(Theme.grid.opacity(0.6))
-                        AxisTick().foregroundStyle(Theme.grid)
+                        AxisGridLine().foregroundStyle(DS.grid)
                         AxisValueLabel()
+                            .font(DS.mono(8))
+                            .foregroundStyle(DS.inkMuted)
                     }
                 }
-                .chartLegend(position: .bottom, spacing: 12)
-                .frame(height: 220)
+                .chartLegend(.hidden)
+                .frame(height: 210)
+                .padding(10)
+                .background(DS.panel)
+                .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
+
+                legend(data)
             }
         }
     }
 
+    /// Built by hand rather than with `chartLegend`, so the swatches are square blocks
+    /// in the same language as everything else.
+    private func legend(_ data: ChartData) -> some View {
+        HStack(spacing: 12) {
+            ForEach(Array(data.names.enumerated()), id: \.element) { index, name in
+                HStack(spacing: 5) {
+                    Rectangle()
+                        .fill(data.colors[index])
+                        .frame(width: 8, height: 8)
+                    Text(name.uppercased())
+                        .font(DS.mono(8))
+                        .foregroundStyle(DS.inkSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+    }
+
     private func tooltip(at date: Date, data: ChartData) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(date.formatted(engine.period.tooltipFormat))
-                .font(.caption2.weight(.semibold))
+        VStack(alignment: .leading, spacing: 4) {
+            Text(date.formatted(engine.period.tooltipFormat).uppercased())
+                .font(DS.mono(8, weight: .bold))
+                .foregroundStyle(DS.ink)
 
             ForEach(Array(data.names.enumerated()), id: \.element) { index, name in
                 if let bytes = data.values[name]?[date] {
                     HStack(spacing: 5) {
-                        Circle()
+                        Rectangle()
                             .fill(data.colors[index])
                             .frame(width: 6, height: 6)
-                        Text(name)
+                        Text(name.uppercased())
                             .lineLimit(1)
-                        Spacer(minLength: 8)
+                            .foregroundStyle(DS.inkSecondary)
+                        Spacer(minLength: 10)
                         Text(formatBytes(bytes))
-                            .monospacedDigit()
+                            .foregroundStyle(DS.ink)
                     }
-                    .font(.caption2)
+                    .font(DS.mono(8))
                 }
             }
         }
         .padding(8)
-        .frame(maxWidth: 220)
-        .background(.regularMaterial, in: .rect(cornerRadius: 6))
+        .frame(maxWidth: 230)
+        .background(DS.ground)
+        .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
     }
 
     // MARK: - App list
 
     private var appList: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("All apps")
-                    .font(.caption.weight(.medium))
+                SectionLabel("ALL_APPS")
                 Spacer()
-                Text("\(engine.apps.count) with traffic")
-                    .font(.caption)
+                Text("[\(engine.apps.count)]")
+                    .font(DS.mono(8, weight: .bold))
+                    .foregroundStyle(DS.inkMuted)
             }
-            .foregroundStyle(.secondary)
 
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -183,13 +225,14 @@ struct DetailView: View {
                         DetailRow(
                             app: app,
                             share: Double(app.total) / Double(max(engine.apps.first?.total ?? 1, 1)),
-                            color: Theme.color(slot: engine.colorSlots[app.key])
+                            color: DS.seriesColor(slot: engine.colorSlots[app.key])
                         )
-                        .background(index.isMultiple(of: 2) ? Color.clear : Theme.grid.opacity(0.25))
+                        .background(index.isMultiple(of: 2) ? DS.ground : DS.panel.opacity(0.6))
                     }
                 }
             }
-            .frame(minHeight: 140)
+            .frame(minHeight: 130)
+            .overlay(Rectangle().strokeBorder(DS.border, lineWidth: 1))
         }
     }
 
@@ -203,8 +246,8 @@ struct DetailView: View {
         var id: String { "\(series)@\(date.timeIntervalSince1970)" }
     }
 
-    /// Everything the chart needs, built in one pass. The tooltip used to look values
-    /// up by rebuilding this for every series on every hover frame.
+    /// Everything the chart needs, built in one pass. The tooltip used to look values up
+    /// by rebuilding this for every series on every hover frame.
     private struct ChartData {
         let rows: [SeriesRow]
         let names: [String]
@@ -214,10 +257,10 @@ struct DetailView: View {
 
     /// The total line plus one line per charted app.
     ///
-    /// Each app is given a value at every bucket the chart plots, zero included. A
-    /// sparse series would otherwise draw a straight line across the quiet stretches,
-    /// implying traffic that never happened — and an app seen in a single bucket, like
-    /// a one-off download, would have no line to draw at all.
+    /// Each app is given a value at every bucket the chart plots, zero included. A sparse
+    /// series would otherwise draw a straight line across the quiet stretches, implying
+    /// traffic that never happened — and an app seen in a single bucket, like a one-off
+    /// download, would have no line to draw at all.
     private var chartData: ChartData {
         let buckets = engine.totalSeries.map(\.date)
 
@@ -225,7 +268,7 @@ struct DetailView: View {
             SeriesRow(series: Self.totalSeriesName, date: $0.date, bytes: $0.bytes)
         }
         var names = [Self.totalSeriesName]
-        var colors = [Theme.total]
+        var colors = [DS.ink]
         var values = [Self.totalSeriesName: Dictionary(
             engine.totalSeries.map { ($0.date, $0.bytes) },
             uniquingKeysWith: +
@@ -242,7 +285,7 @@ struct DetailView: View {
             // order, and a dictionary has none.
             rows += buckets.map { SeriesRow(series: name, date: $0, bytes: filled[$0] ?? 0) }
             names.append(name)
-            colors.append(Theme.color(slot: engine.colorSlots[app.key]))
+            colors.append(DS.seriesColor(slot: engine.colorSlots[app.key]))
             values[name] = filled
         }
 
@@ -275,36 +318,30 @@ private struct DetailRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(nsImage: AppIcon.image(for: app))
-                .resizable()
-                .frame(width: 18, height: 18)
+            IconTile(app: app, size: 22)
 
-            Text(app.displayName)
+            Text(app.displayName.uppercased())
+                .font(DS.mono(10, weight: .bold))
+                .foregroundStyle(DS.ink)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(minWidth: 120, alignment: .leading)
+                .frame(minWidth: 150, alignment: .leading)
 
-            Capsule()
-                .fill(color)
-                .frame(height: 4)
-                .scaleEffect(x: max(share, 0.01), y: 1, anchor: .leading)
+            HatchedBar(fraction: share, height: 7, tint: color)
                 .frame(maxWidth: .infinity)
 
             Group {
-                Label(formatBytes(app.received), systemImage: "arrow.down")
-                    .frame(width: 84, alignment: .trailing)
-                Label(formatBytes(app.sent), systemImage: "arrow.up")
-                    .frame(width: 84, alignment: .trailing)
+                Text("↓ \(formatBytes(app.received))").frame(width: 92, alignment: .trailing)
+                Text("↑ \(formatBytes(app.sent))").frame(width: 92, alignment: .trailing)
                 Text(formatBytes(app.total))
-                    .frame(width: 74, alignment: .trailing)
-                    .fontWeight(.medium)
+                    .foregroundStyle(DS.ink)
+                    .frame(width: 80, alignment: .trailing)
             }
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
+            .font(DS.mono(9))
+            .foregroundStyle(DS.inkSecondary)
         }
-        .font(.caption)
-        .padding(.vertical, 5)
-        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(app.displayName), \(formatBytes(app.received)) received, \(formatBytes(app.sent)) sent"
@@ -315,9 +352,9 @@ private struct DetailRow: View {
 extension Period {
     var grainLabel: String {
         switch self {
-        case .day: "minute"
-        case .week: "hour"
-        case .month: "day"
+        case .day: "MINUTE"
+        case .week: "HOUR"
+        case .month: "DAY"
         }
     }
 

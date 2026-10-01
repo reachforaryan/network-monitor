@@ -11,7 +11,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "NetworkMonitorApp",
-            dependencies: ["MonitorCore"]
+            dependencies: ["MonitorCore"],
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "MonitorCoreTests",
