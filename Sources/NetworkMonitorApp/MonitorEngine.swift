@@ -32,6 +32,8 @@ final class MonitorEngine {
 
     private(set) var rate = Rate()
     private(set) var rateHistory: [Rate] = []
+    /// Palette slot per app, so an app keeps its color as ranks swap.
+    private(set) var colorSlots: [String: Int] = [:]
     private(set) var totalSeries: [UsagePoint] = []
     private(set) var appSeries: [String: [UsagePoint]] = [:]
     private(set) var errorMessage: String?
@@ -127,6 +129,24 @@ final class MonitorEngine {
         for (key, counters) in sample {
             pending[key, default: .zero] += counters
         }
+
+        assignColorSlots()
+    }
+
+    /// Colors follow the app, not its position in the list: an app holds its slot for
+    /// as long as it stays on screen, and only releases it when it drops out.
+    private func assignColorSlots() {
+        let keys = topApps.map(\.key)
+        var slots = colorSlots.filter { keys.contains($0.key) }
+        var used = Set(slots.values)
+
+        for key in keys where slots[key] == nil {
+            guard let free = (0..<Self.topAppCount).first(where: { !used.contains($0) }) else { break }
+            slots[key] = free
+            used.insert(free)
+        }
+
+        colorSlots = slots
     }
 
     private func flush() async {
@@ -162,6 +182,7 @@ final class MonitorEngine {
         do {
             stored = try await store.usage(period: period, scope: scope)
             totalSeries = try await store.totalSeries(period: period, scope: scope)
+            assignColorSlots()
             appSeries = try await store.appSeries(
                 keys: topApps.map(\.key),
                 period: period,
