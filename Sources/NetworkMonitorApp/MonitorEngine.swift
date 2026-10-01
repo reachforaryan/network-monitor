@@ -119,6 +119,17 @@ final class MonitorEngine {
         )
     }
 
+    /// Exports what is on screen — the current period and scope, after filtering, since
+    /// that is what the user is looking at when they ask for it.
+    func exportCSV(to url: URL) throws {
+        try csv(from: apps).write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    var suggestedExportName: String {
+        let day = Date().formatted(.iso8601.year().month().day().dateSeparator(.dash))
+        return "network-usage-\(period.rawValue)-\(scope.rawValue)-\(day).csv"
+    }
+
     /// Writes out whatever has been sampled but not yet committed. Quitting without
     /// this discards up to a flush interval of usage.
     func flushBeforeQuit() async {

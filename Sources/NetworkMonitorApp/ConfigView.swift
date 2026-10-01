@@ -1,11 +1,14 @@
+import AppKit
 import MonitorCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Settings popover. Everything here would clutter the dropdown if it sat on the panel.
 struct ConfigView: View {
     @Bindable var engine: MonitorEngine
 
     @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var exportStatus: String?
 
     /// Round numbers rather than a free-form field: this is noise reduction, not a
     /// measurement.
@@ -46,6 +49,10 @@ struct ConfigView: View {
                 caption("START AT LOGIN")
             }
 
+            section("DATA") {
+                BracketButton(title: "Export CSV", icon: "square.and.arrow.down", action: export)
+                caption(exportStatus ?? "CURRENT PERIOD AND SCOPE")
+            }
         }
         .padding(12)
         .frame(width: 240)
@@ -63,5 +70,20 @@ struct ConfigView: View {
         Text("// \(text)")
             .font(DS.mono(8))
             .foregroundStyle(DS.inkMuted)
+    }
+
+    private func export() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = engine.suggestedExportName
+        panel.allowedContentTypes = [.commaSeparatedText]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try engine.exportCSV(to: url)
+            exportStatus = "SAVED \(engine.apps.count) ROWS"
+        } catch {
+            exportStatus = "EXPORT FAILED"
+        }
     }
 }
