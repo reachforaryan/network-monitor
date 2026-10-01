@@ -50,20 +50,20 @@ public actor Collector {
         for row in allRows {
             let previous = lastAll[row.pid]
             lastAll[row.pid] = row
-            let isNew = previous == nil && startedSinceLastSample(row.pid)
+            let isFresh = startedSinceLastSample(row.pid)
             usage[key(for: row), default: .zero] += Counters(
-                allIn: Self.delta(current: row.received, last: previous?.received, countsFromZero: isNew),
-                allOut: Self.delta(current: row.sent, last: previous?.sent, countsFromZero: isNew)
+                allIn: Self.delta(current: row.received, last: previous?.received, isFreshProcess: isFresh),
+                allOut: Self.delta(current: row.sent, last: previous?.sent, isFreshProcess: isFresh)
             )
         }
 
         for row in externalRows {
             let previous = lastExternal[row.pid]
             lastExternal[row.pid] = row
-            let isNew = previous == nil && startedSinceLastSample(row.pid)
+            let isFresh = startedSinceLastSample(row.pid)
             usage[key(for: row), default: .zero] += Counters(
-                extIn: Self.delta(current: row.received, last: previous?.received, countsFromZero: isNew),
-                extOut: Self.delta(current: row.sent, last: previous?.sent, countsFromZero: isNew)
+                extIn: Self.delta(current: row.received, last: previous?.received, isFreshProcess: isFresh),
+                extOut: Self.delta(current: row.sent, last: previous?.sent, isFreshProcess: isFresh)
             )
         }
 
@@ -94,10 +94,13 @@ public actor Collector {
     /// ponytail: a process that both starts and exits between two samples is still
     /// invisible. Catching those needs event-driven accounting (NetworkExtension), not
     /// polling; the 2s window keeps the loss small.
-    static func delta(current: UInt64, last: UInt64?, countsFromZero: Bool = false) -> UInt64 {
-        guard let last else { return countsFromZero ? current : 0 }
-        // A drop means pid reuse or a counter reset, so `current` is all new traffic.
-        return current >= last ? current - last : current
+    /// A counter that goes *down* is nettop re-stating a process's total, usually by a
+    /// few bytes as sockets close. Only a genuinely new process behind the same pid
+    /// makes the whole counter ours; otherwise re-baseline and count nothing, because
+    /// treating a wobble as new traffic turns a 54-byte drop into a 98MB spike.
+    static func delta(current: UInt64, last: UInt64?, isFreshProcess: Bool = false) -> UInt64 {
+        guard let last, !isFreshProcess else { return isFreshProcess ? current : 0 }
+        return current >= last ? current - last : 0
     }
 
     /// Process start time via libproc. No entitlement needed.

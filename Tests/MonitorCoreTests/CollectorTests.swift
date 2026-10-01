@@ -29,9 +29,15 @@ import Testing
     #expect(Collector.delta(current: 200, last: 200) == 0)
 }
 
-@Test func deltaTreatsACounterDropAsAFreshProcess() {
-    // pid reuse: the new process's whole counter postdates our last reading.
-    #expect(Collector.delta(current: 40, last: 10_000) == 40)
+@Test func deltaIgnoresACounterThatGoesBackwards() {
+    // nettop re-states totals as sockets close; that is not 40 bytes of new traffic,
+    // and counting `current` here is what turned a 54-byte drop into a 98MB spike.
+    #expect(Collector.delta(current: 40, last: 10_000) == 0)
+}
+
+@Test func deltaClaimsTheWholeCounterWhenThePidWasReused() {
+    // Same pid, process newer than our last sample: none of the counter is ours yet.
+    #expect(Collector.delta(current: 40, last: 10_000, isFreshProcess: true) == 40)
 }
 
 @Test func groupKeyRollsHelpersUpIntoTheParentApp() {
@@ -68,7 +74,7 @@ import Testing
 
 @Test func deltaCountsTheWholeCounterForAProcessNewerThanTheLastSample() {
     // All of a just-launched process's traffic happened inside our window.
-    #expect(Collector.delta(current: 25_000_000, last: nil, countsFromZero: true) == 25_000_000)
+    #expect(Collector.delta(current: 25_000_000, last: nil, isFreshProcess: true) == 25_000_000)
 }
 
 @Test func startTimeResolvesForALiveProcess() throws {
