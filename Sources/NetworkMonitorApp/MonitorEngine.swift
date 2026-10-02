@@ -44,6 +44,10 @@ final class MonitorEngine {
     /// than quietly presenting a filtered list as the whole picture.
     private(set) var unfilteredCount = 0
 
+    /// The app whose sessions are open — shared so the dropdown can open the detail
+    /// window straight onto them.
+    var sessionsApp: AppUsage?
+
     private(set) var rate = Rate()
     private(set) var rateHistory: [Rate] = []
     /// Palette slot per app, so an app keeps its color as ranks swap.

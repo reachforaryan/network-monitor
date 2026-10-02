@@ -119,15 +119,21 @@ struct CompactView: View {
                     .foregroundStyle(DS.inkMuted)
                     .padding(.vertical, 8)
             } else {
-                VStack(spacing: 7) {
+                VStack(spacing: 2) {
                     ForEach(engine.topApps) { app in
                         AppRow(
                             app: app,
                             share: engine.share(of: app),
                             color: DS.seriesColor(slot: engine.colorSlots[app.key])
-                        )
+                        ) {
+                            engine.sessionsApp = app
+                            openDetail()
+                        }
                     }
                 }
+                // The hover frame's padding hangs outside the column, so icons stay
+                // aligned with everything above.
+                .padding(.horizontal, -5)
             }
         }
     }
@@ -151,13 +157,27 @@ struct CompactView: View {
     }
 }
 
-/// One app in the top-five list: identity, magnitude, and a hatched share bar.
+/// One app in the top-five list: identity, magnitude, and a hatched share bar. Clicking
+/// opens its sessions; hover frames the row and lights a ✦ so that is discoverable.
 private struct AppRow: View {
     let app: AppUsage
     let share: Double
     let color: Color
+    let openSessions: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
+        Button(action: openSessions) { content }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .help("Show sessions")
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(app.displayName), \(formatBytes(app.total)), \(percentage) of total")
+            .accessibilityHint("Opens this app's sessions")
+    }
+
+    private var content: some View {
         HStack(spacing: 8) {
             IconTile(app: app)
 
@@ -185,9 +205,22 @@ private struct AppRow: View {
                         .frame(width: 30, alignment: .trailing)
                 }
             }
+
+            Text("✦")
+                .font(DS.mono(9))
+                .foregroundStyle(isHovering ? DS.ink : DS.hairline)
+                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(app.displayName), \(formatBytes(app.total)), \(percentage) of total")
+        .padding(5)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusControl, style: .continuous)
+                .fill(isHovering ? DS.panel : DS.ground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.radiusControl, style: .continuous)
+                .strokeBorder(isHovering ? DS.border : .clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
     }
 
     /// Rounding a real but tiny share to "0%" reads as "used nothing", which is a

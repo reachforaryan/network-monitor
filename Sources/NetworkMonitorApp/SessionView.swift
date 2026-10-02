@@ -257,17 +257,15 @@ struct SessionView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
-                    row(session)
-                        .background(
-                            session.id == selected.id
-                                ? DS.panelRaised
-                                : (index.isMultiple(of: 2) ? DS.ground : DS.panel.opacity(0.6))
-                        )
+                    row(session, isSelected: session.id == selected.id)
+                        .background(index.isMultiple(of: 2) ? DS.ground : DS.panel.opacity(0.6))
                         .contentShape(Rectangle())
                         .onTapGesture { selectedID = session.id }
                         .accessibilityAddTraits(.isButton)
                 }
             }
+            // Room for the selected row's frame, which the scroll view would clip.
+            .padding(1)
         }
         .clipShape(RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous))
         .overlay(
@@ -276,7 +274,9 @@ struct SessionView: View {
         )
     }
 
-    private func row(_ session: AppSession) -> some View {
+    /// The selected row is framed in white with a ✦, the same "this one" mark as the
+    /// active source in the reference design.
+    private func row(_ session: AppSession, isSelected: Bool) -> some View {
         HStack(spacing: 10) {
             Text(session.start.formatted(.dateTime.weekday().day().month().hour().minute()).uppercased())
                 .frame(width: 150, alignment: .leading)
@@ -287,11 +287,19 @@ struct SessionView: View {
             Text(formatBytes(session.bytes))
                 .foregroundStyle(DS.ink)
                 .frame(width: 80, alignment: .trailing)
+            Text("✦")
+                .foregroundStyle(isSelected ? DS.ink : .clear)
+                .accessibilityHidden(true)
         }
-        .font(DS.mono(9))
-        .foregroundStyle(DS.inkSecondary)
+        .font(DS.mono(9, weight: isSelected ? .bold : .regular))
+        .foregroundStyle(isSelected ? DS.ink : DS.inkSecondary)
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.radiusMark, style: .continuous)
+                .strokeBorder(isSelected ? DS.ink : .clear, lineWidth: 1)
+        )
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func tooltip(_ title: String, _ value: String) -> some View {
