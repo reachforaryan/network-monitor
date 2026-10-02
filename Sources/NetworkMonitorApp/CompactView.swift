@@ -9,6 +9,7 @@ struct CompactView: View {
     let openDetail: () -> Void
 
     @State private var showConfig = false
+    @AppStorage("rateInBits") private var rateInBits = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -81,8 +82,8 @@ struct CompactView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 2) {
-                        rateLine("↓", formatRate(engine.rate.received))
-                        rateLine("↑", formatRate(engine.rate.sent))
+                        rateLine("↓", formatRate(engine.rate.received, bits: rateInBits))
+                        rateLine("↑", formatRate(engine.rate.sent, bits: rateInBits))
                     }
                 }
 

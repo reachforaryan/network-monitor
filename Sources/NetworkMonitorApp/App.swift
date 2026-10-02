@@ -31,13 +31,17 @@ struct NetworkMonitorApp: App {
 /// would be permanent clutter for most of the day.
 private struct MenuBarLabel: View {
     let engine: MonitorEngine
+    @AppStorage("rateInBits") private var rateInBits = false
+
+    /// Bits keep the same four-character readout; only the scale changes.
+    private func compact(_ rate: Double) -> String { compactRate(rateInBits ? rate * 8 : rate) }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "network")
 
             if engine.isLive {
-                Text("↓\(compactRate(engine.rate.received)) ↑\(compactRate(engine.rate.sent))")
+                Text("↓\(compact(engine.rate.received)) ↑\(compact(engine.rate.sent))")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
             }
         }

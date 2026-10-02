@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct ConfigView: View {
     @Bindable var engine: MonitorEngine
 
+    @AppStorage("rateInBits") private var rateInBits = false
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var exportStatus: String?
 
@@ -32,6 +33,17 @@ struct ConfigView: View {
                 ) { $0 == 0 ? "OFF" : formatBytes($0).replacingOccurrences(of: " ", with: "") }
 
                 caption("MIN_TRAFFIC PER APP")
+            }
+
+            section("UNITS") {
+                BracketButton(
+                    title: rateInBits ? "RATE: MBPS" : "RATE: MB/S",
+                    emphasized: rateInBits
+                ) {
+                    rateInBits.toggle()
+                }
+
+                caption("SPEEDS IN BITS, AS ISPS QUOTE THEM")
             }
 
             section("STARTUP") {
