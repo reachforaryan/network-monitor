@@ -22,7 +22,7 @@ struct DetailView: View {
         .frame(minWidth: 680, minHeight: 540)
         .background(DS.ground)
         .sheet(item: $sessionsApp) { app in
-            SessionList(app: app, engine: engine)
+            SessionView(app: app, engine: engine)
         }
     }
 
@@ -418,77 +418,6 @@ private struct DetailRow: View {
         .accessibilityLabel(
             "\(app.displayName), \(formatBytes(app.received)) received, \(formatBytes(app.sent)) sent"
         )
-    }
-}
-
-/// An app's sessions over the last week — answers "how much did that evening of
-/// cloud gaming cost?", which period totals can't.
-private struct SessionList: View {
-    let app: AppUsage
-    let engine: MonitorEngine
-    @State private var sessions: [AppSession]?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                IconTile(app: app, size: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(app.displayName.uppercased())
-                        .font(DS.mono(11, weight: .bold))
-                        .foregroundStyle(DS.ink)
-                        .lineLimit(1)
-                    SectionLabel("SESSIONS // LAST 7 DAYS")
-                }
-                Spacer()
-                BracketButton(title: "CLOSE", emphasized: false) { dismiss() }
-                    .frame(width: 80)
-            }
-
-            if let sessions, sessions.isEmpty {
-                Text("// NO SESSIONS IN THE LAST 7 DAYS")
-                    .font(DS.mono(9))
-                    .foregroundStyle(DS.inkMuted)
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array((sessions ?? []).enumerated()), id: \.element.id) { index, session in
-                            row(session)
-                                .background(index.isMultiple(of: 2) ? DS.ground : DS.panel.opacity(0.6))
-                        }
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.radiusPanel, style: .continuous)
-                        .strokeBorder(DS.border, lineWidth: 1)
-                )
-            }
-        }
-        .padding(16)
-        .frame(width: 460, height: 380)
-        .background(DS.ground)
-        // Re-read when the scope flips, so the sessions match the list behind them.
-        .task(id: engine.scope) { sessions = await engine.sessions(for: app.key) }
-    }
-
-    private func row(_ session: AppSession) -> some View {
-        HStack(spacing: 10) {
-            Text(session.start.formatted(.dateTime.weekday().day().hour().minute()).uppercased())
-                .frame(width: 130, alignment: .leading)
-            Text("→ " + session.end.formatted(.dateTime.hour().minute()))
-                .frame(width: 70, alignment: .leading)
-            Text(Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(formatBytes(session.bytes))
-                .foregroundStyle(DS.ink)
-                .frame(width: 80, alignment: .trailing)
-        }
-        .font(DS.mono(9))
-        .foregroundStyle(DS.inkSecondary)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
     }
 }
 
