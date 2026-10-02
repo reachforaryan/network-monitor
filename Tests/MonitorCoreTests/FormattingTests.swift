@@ -27,3 +27,9 @@ import Testing
     // ByteCountFormatter spells this "Zero KB", which reads badly on an axis.
     #expect(formatBytes(0) == "0 KB")
 }
+
+@Test func ratesInBitsUseDecimalNetworkUnits() {
+    #expect(formatRate(5_625_000, bits: true) == "45.0 Mbps")
+    #expect(formatRate(1_000, bits: true) == "8.0 Kbps")
+    #expect(formatRate(200_000_000, bits: true) == "1.6 Gbps")
+}

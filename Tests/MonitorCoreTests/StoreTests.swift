@@ -88,3 +88,30 @@ private func makeStore() async throws -> (Store, URL) {
     #expect(try await store.usage(period: .day, scope: .internet, now: longAgo).isEmpty)
     #expect(try await store.usage(period: .month, scope: .internet, now: longAgo).count == 1)
 }
+
+@Test func finishedSessionsSurvivePruningExactlyOnce() async throws {
+    let (store, url) = try await makeStore()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let gaming = Counters(extIn: 1_000_000, extOut: 0, allIn: 1_000_000, allOut: 0)
+    // Straddles the 7-day minute retention once `later` comes round.
+    let start = Date(timeIntervalSince1970: 1_700_000_040)
+    for minute in 0..<10 {
+        try await store.flush(["game": gaming], at: start + TimeInterval(minute * 60))
+    }
+    // Still going at `now`, so not finished yet.
+    let now = start + 3600
+    try await store.flush(["game": gaming], at: now - 60)
+
+    try await store.prune(now: now)
+    #expect(try await store.archivedSessions(key: "game").map(\.bytes) == [10_000_000])
+
+    // A week on, pruning has trimmed the head; re-archiving must not add a partial copy.
+    let later = start + 7 * 86_400 + 300
+    try await store.prune(now: later)
+    try await store.prune(now: later + 86_400)
+
+    let saved = try await store.archivedSessions(key: "game")
+    #expect(saved.map(\.bytes) == [1_000_000, 10_000_000])
+    #expect(saved.last?.duration == 600)
+}

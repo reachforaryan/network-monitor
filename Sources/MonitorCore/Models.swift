@@ -139,8 +139,18 @@ public func formatBytes(_ bytes: UInt64) -> String {
     return ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
 }
 
-public func formatRate(_ bytesPerSecond: Double) -> String {
-    formatBytes(UInt64(max(0, bytesPerSecond))) + "/s"
+/// `bits` speaks the units ISPs and streaming apps quote ("45 Mbps"), decimal as they are.
+public func formatRate(_ bytesPerSecond: Double, bits: Bool = false) -> String {
+    guard bits else { return formatBytes(UInt64(max(0, bytesPerSecond))) + "/s" }
+
+    let value = max(0, bytesPerSecond) * 8
+    let (scale, unit): (Double, String) =
+        switch value {
+        case 999.95e6...: (1e9, "Gbps")
+        case 999.95e3..<999.95e6: (1e6, "Mbps")
+        default: (1e3, "Kbps")
+        }
+    return String(format: "%.1f %@", value / scale, unit)
 }
 
 /// A rate in exactly four characters, for the menu bar.
@@ -172,45 +182,60 @@ public func compactRate(_ bytesPerSecond: Double) -> String {
 public struct AppSession: Sendable, Identifiable, Equatable {
     public let start: Date
     public let end: Date
-    public let bytes: UInt64
+    /// Every recorded minute from start to end, quiet ones inside the session included.
+    public let points: [UsagePoint]
 
-    public init(start: Date, end: Date, bytes: UInt64) {
-        self.start = start
-        self.end = end
-        self.bytes = bytes
+    public init(points: [UsagePoint]) {
+        precondition(!points.isEmpty, "a session has at least one active minute")
+        self.points = points
+        start = points[0].date
+        end = points[points.count - 1].date + 60
     }
 
-    public var id: Date { start }
+    /// A finished session's end never moves — later traffic starts a new session, and
+    /// pruning only trims its head — so the end, not the start, identifies it.
+    public var id: Date { end }
+    public var bytes: UInt64 { points.reduce(0) { $0 + $1.bytes } }
     public var duration: TimeInterval { end.timeIntervalSince(start) }
+    /// Bytes per second over the whole session.
+    public var averageRate: Double { Double(bytes) / duration }
+    /// Bytes per second in the busiest minute.
+    public var peakRate: Double { Double(points.map(\.bytes).max() ?? 0) / 60 }
 }
+
+/// Silence longer than this ends a session.
+public let sessionGap: TimeInterval = 5 * 60
 
 /// Groups an app's minute buckets (oldest first) into sessions, newest first.
 ///
-/// Derived on demand from history already recorded for every app, so there is no
-/// per-app tracking to configure. Minutes below `minimumBytes` count as idle, so a
-/// launcher's background trickle doesn't glue two sessions together.
+/// Minutes below `minimumBytes` count as idle, so a launcher's background trickle
+/// doesn't glue two sessions together — but quiet minutes *inside* a session still
+/// count toward its total.
 // ponytail: fixed 5-min gap and 100 KB/min idle floor; make them per-app settings if
 // some app's sessions split or merge wrongly.
 public func sessions(
     from points: [UsagePoint],
-    gap: TimeInterval = 5 * 60,
+    gap: TimeInterval = sessionGap,
     minimumBytes: UInt64 = 100_000
 ) -> [AppSession] {
     var result: [AppSession] = []
-    var current: (start: Date, last: Date, bytes: UInt64)?
+    var current: [UsagePoint] = []
+    var quiet: [UsagePoint] = []
 
-    for point in points where point.bytes >= minimumBytes {
-        if let open = current, point.date.timeIntervalSince(open.last) <= gap {
-            current = (open.start, point.date, open.bytes + point.bytes)
-        } else {
-            if let open = current {
-                result.append(AppSession(start: open.start, end: open.last + 60, bytes: open.bytes))
-            }
-            current = (point.date, point.date, point.bytes)
+    for point in points {
+        guard point.bytes >= minimumBytes else {
+            if !current.isEmpty { quiet.append(point) }
+            continue
         }
+        if let last = current.last, point.date.timeIntervalSince(last.date) <= gap {
+            current += quiet
+        } else if !current.isEmpty {
+            result.append(AppSession(points: current))
+            current = []
+        }
+        quiet = []
+        current.append(point)
     }
-    if let open = current {
-        result.append(AppSession(start: open.start, end: open.last + 60, bytes: open.bytes))
-    }
+    if !current.isEmpty { result.append(AppSession(points: current)) }
     return result.reversed()
 }

@@ -141,26 +141,30 @@ final class MonitorEngine {
         return "network-usage-\(period.rawValue)-\(scope.rawValue)-\(day).csv"
     }
 
-    /// The app's sessions over the minute history's 7-day retention, newest first.
+    /// The app's sessions, newest first, measured on internet traffic: saved ones plus
+    /// any the last week of minutes holds that aren't saved yet, including one in progress.
     func sessions(for key: String) async -> [AppSession] {
         guard let store else { return [] }
-        let scope = scope
         let since = Date().addingTimeInterval(-7 * 86_400)
 
         do {
+            let archived = try await store.archivedSessions(key: key)
             var byMinute = Dictionary(
-                try await store.minuteSeries(key: key, scope: scope, since: since).map { ($0.date, $0.bytes) },
+                try await store.minuteSeries(key: key, scope: .internet, since: since).map { ($0.date, $0.bytes) },
                 uniquingKeysWith: +
             )
-            // Read after the await, so a flush that ran meanwhile isn't counted twice.
-            // Unflushed minutes are added so a session in progress is current.
+            // Read after the awaits, so a flush that ran meanwhile isn't counted twice.
             for (bucket, batch) in pending {
                 guard let counters = batch[key] else { continue }
-                let (received, sent) = counters.bytes(for: scope)
+                let (received, sent) = counters.bytes(for: .internet)
                 byMinute[bucket, default: 0] += received + sent
             }
             let points = byMinute.map { UsagePoint(date: $0.key, bytes: $0.value) }.sorted { $0.date < $1.date }
-            return MonitorCore.sessions(from: points)
+
+            // The saved copy wins: the live one may have lost its head to pruning.
+            let saved = Set(archived.map(\.end))
+            let live = MonitorCore.sessions(from: points).filter { !saved.contains($0.end) }
+            return (archived + live).sorted { $0.start > $1.start }
         } catch {
             errorMessage = "Could not read history: \(error)"
             return []

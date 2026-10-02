@@ -67,6 +67,20 @@ public actor Store {
                 """
             )
         }
+
+        // Finished sessions outlive the week of minutes they are derived from.
+        try exec(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                app_key TEXT    NOT NULL,
+                end     INTEGER NOT NULL,
+                start   INTEGER NOT NULL,
+                bytes   INTEGER NOT NULL,
+                points  TEXT    NOT NULL,
+                PRIMARY KEY (app_key, end)
+            ) WITHOUT ROWID
+            """
+        )
     }
 
     deinit { sqlite3_close(db) }
@@ -115,15 +129,94 @@ public actor Store {
         }
     }
 
-    /// Drops buckets past their retention. Cheap enough to run at launch only.
+    /// Drops buckets past their retention, first saving the sessions in the minutes about
+    /// to go. Cheap enough to run at launch and once a day.
     public func prune(now: Date = Date()) throws {
+        try archiveSessions(now: now)
         for (grain, days) in Self.retention {
             guard let cutoff = calendar.date(byAdding: .day, value: -days, to: now) else { continue }
             try exec("DELETE FROM \(grain.table) WHERE bucket < \(bucket(cutoff, grain: grain))")
         }
     }
 
+    /// Saves every finished session in the minute history, internet traffic only.
+    ///
+    /// Re-running is safe: a finished session's end never changes, and pruning can only
+    /// trim its head, so a trimmed re-derivation hits the same `(app_key, end)` and is
+    /// ignored rather than duplicated.
+    func archiveSessions(now: Date) throws {
+        let read = try prepare(
+            """
+            SELECT app_key, bucket, ext_in + ext_out
+              FROM usage_minute
+             WHERE ext_in + ext_out > 0
+             ORDER BY app_key, bucket
+            """
+        )
+        defer { sqlite3_finalize(read) }
+
+        var byKey: [String: [UsagePoint]] = [:]
+        while sqlite3_step(read) == SQLITE_ROW {
+            byKey[String(cString: sqlite3_column_text(read, 0)), default: []].append(
+                UsagePoint(
+                    date: Date(timeIntervalSince1970: TimeInterval(sqlite3_column_int64(read, 1))),
+                    bytes: UInt64(clamping: sqlite3_column_int64(read, 2))
+                )
+            )
+        }
+
+        // Still open if traffic could yet arrive within the gap, plus a minute for the
+        // bucket being filled and not yet flushed.
+        let finishedBefore = now - sessionGap - 60
+
+        try exec("BEGIN")
+        do {
+            let write = try prepare(
+                "INSERT OR IGNORE INTO sessions (app_key, end, start, bytes, points) VALUES (?, ?, ?, ?, ?)"
+            )
+            defer { sqlite3_finalize(write) }
+
+            for (key, points) in byKey {
+                for session in sessions(from: points) where session.end < finishedBefore {
+                    let pairs = session.points.map { [Int64($0.date.timeIntervalSince1970), Int64(clamping: $0.bytes)] }
+                    let json = String(decoding: try JSONEncoder().encode(pairs), as: UTF8.self)
+
+                    sqlite3_bind_text(write, 1, key, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_int64(write, 2, Int64(session.end.timeIntervalSince1970))
+                    sqlite3_bind_int64(write, 3, Int64(session.start.timeIntervalSince1970))
+                    sqlite3_bind_int64(write, 4, Int64(clamping: session.bytes))
+                    sqlite3_bind_text(write, 5, json, -1, SQLITE_TRANSIENT)
+                    guard sqlite3_step(write) == SQLITE_DONE else {
+                        throw StoreError.sqlite(lastErrorMessage)
+                    }
+                    sqlite3_reset(write)
+                }
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
     // MARK: - Reading
+
+    /// An app's saved sessions, newest first.
+    public func archivedSessions(key: String) throws -> [AppSession] {
+        let statement = try prepare("SELECT points FROM sessions WHERE app_key = ? ORDER BY end DESC")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, key, -1, SQLITE_TRANSIENT)
+
+        var result: [AppSession] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let json = Data(String(cString: sqlite3_column_text(statement, 0)).utf8)
+            let points = try JSONDecoder().decode([[Int64]].self, from: json).map {
+                UsagePoint(date: Date(timeIntervalSince1970: TimeInterval($0[0])), bytes: UInt64(clamping: $0[1]))
+            }
+            if !points.isEmpty { result.append(AppSession(points: points)) }
+        }
+        return result
+    }
 
     /// Every app with traffic in the period, biggest first. Serves the period total,
     /// the compact view's top 5, and the detail window's full list from one query.
