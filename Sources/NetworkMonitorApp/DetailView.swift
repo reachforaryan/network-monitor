@@ -7,7 +7,6 @@ import SwiftUI
 struct DetailView: View {
     @Bindable var engine: MonitorEngine
     @State private var hovered: Date?
-    @State private var sessionsApp: AppUsage?
 
     private static let totalSeriesName = "ALL TRAFFIC"
 
@@ -21,7 +20,7 @@ struct DetailView: View {
         .padding(16)
         .frame(minWidth: 680, minHeight: 540)
         .background(DS.ground)
-        .sheet(item: $sessionsApp) { app in
+        .sheet(item: $engine.sessionsApp) { app in
             SessionView(app: app, engine: engine)
         }
     }
@@ -108,15 +107,24 @@ struct DetailView: View {
             } else {
                 let data = chartData
                 Chart {
+                    // The total is a filled backdrop, not a line: drawn as a white line it
+                    // sat right on top of whichever app dominated and read as an outline
+                    // around it. As an area, the apps read against "everything".
                     ForEach(data.rows) { row in
-                        LineMark(
-                            x: .value("Time", row.date),
-                            y: .value("Bytes", row.bytes),
-                            series: .value("Series", row.series)
-                        )
-                        .interpolationMethod(DS.curve)
-                        .foregroundStyle(by: .value("Series", row.series))
-                        .lineStyle(DS.lineStyle(width: row.series == Self.totalSeriesName ? 2 : 1.5))
+                        if row.series == Self.totalSeriesName {
+                            AreaMark(x: .value("Time", row.date), y: .value("Bytes", row.bytes))
+                                .interpolationMethod(DS.curve)
+                                .foregroundStyle(by: .value("Series", row.series))
+                        } else {
+                            LineMark(
+                                x: .value("Time", row.date),
+                                y: .value("Bytes", row.bytes),
+                                series: .value("Series", row.series)
+                            )
+                            .interpolationMethod(DS.curve)
+                            .foregroundStyle(by: .value("Series", row.series))
+                            .lineStyle(DS.lineStyle(width: 1.5))
+                        }
                     }
 
                     if let hovered, let marker = nearestPoint(to: hovered) {
@@ -175,6 +183,9 @@ struct DetailView: View {
                     Rectangle()
                         .fill(data.colors[index])
                         .frame(width: 8, height: 8)
+                        // The total's fill is deliberately dim; an outline keeps its
+                        // swatch findable against the black.
+                        .overlay(Rectangle().strokeBorder(index == 0 ? DS.inkMuted : .clear, lineWidth: 1))
                     Text(name.uppercased())
                         .font(DS.mono(8))
                         .foregroundStyle(DS.inkSecondary)
@@ -255,13 +266,11 @@ struct DetailView: View {
                         DetailRow(
                             app: app,
                             share: engine.share(of: app),
-                            color: DS.seriesColor(slot: engine.colorSlots[app.key])
-                        )
-                        .background(index.isMultiple(of: 2) ? DS.ground : DS.panel.opacity(0.6))
-                        .contentShape(Rectangle())
-                        .onTapGesture { sessionsApp = app }
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityHint("Shows this app's sessions")
+                            color: DS.seriesColor(slot: engine.colorSlots[app.key]),
+                            striped: !index.isMultiple(of: 2)
+                        ) {
+                            engine.sessionsApp = app
+                        }
                     }
                 }
             }
@@ -340,7 +349,7 @@ struct DetailView: View {
             SeriesRow(series: Self.totalSeriesName, date: $0.date, bytes: $0.bytes)
         }
         var names = [Self.totalSeriesName]
-        var colors = [DS.ink]
+        var colors = [DS.totalFill]
         var values = [Self.totalSeriesName: Dictionary(
             engine.totalSeries.map { ($0.date, $0.bytes) },
             uniquingKeysWith: +
@@ -383,12 +392,29 @@ struct DetailView: View {
     }
 }
 
+/// One app. The whole row opens its sessions, and says so: a `[ SESSIONS ]` cue that
+/// lights on hover, since a plain data row gives no hint it can be clicked.
 private struct DetailRow: View {
     let app: AppUsage
     let share: Double
     let color: Color
+    let striped: Bool
+    let openSessions: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
+        Button(action: openSessions) { content }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(app.displayName), \(formatBytes(app.received)) received, \(formatBytes(app.sent)) sent"
+            )
+            .accessibilityHint("Shows this app's sessions")
+    }
+
+    private var content: some View {
         HStack(spacing: 10) {
             IconTile(app: app, size: 22)
 
@@ -411,13 +437,16 @@ private struct DetailRow: View {
             }
             .font(DS.mono(9))
             .foregroundStyle(DS.inkSecondary)
+
+            Text("[ SESSIONS ]")
+                .font(DS.mono(8, weight: .bold))
+                .foregroundStyle(isHovering ? DS.ink : DS.inkMuted)
+                .frame(width: 86, alignment: .trailing)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(app.displayName), \(formatBytes(app.received)) received, \(formatBytes(app.sent)) sent"
-        )
+        .background(isHovering ? DS.panelRaised : (striped ? DS.panel.opacity(0.6) : DS.ground))
+        .contentShape(Rectangle())
     }
 }
 

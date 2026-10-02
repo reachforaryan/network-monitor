@@ -45,15 +45,19 @@ enum DS {
 
     static let grid = Color(rgb: 0x1A1A1A)
 
+    /// Backdrop for "all traffic" behind the per-app lines — present, but never a line
+    /// that competes with them.
+    static let totalFill = Color(rgb: 0x2E2E2E)
+
     static func seriesColor(slot: Int?) -> Color {
         guard let slot, series.indices.contains(slot) else { return inkMuted }
         return series[slot]
     }
 
-    /// Chart lines: a gentle curve rather than hard vertices. Cardinal keeps the line
-    /// passing through every real sample — unlike a spline that invents a smoother path
-    /// than the data supports — while rounding the corners off the peaks.
-    static let curve: InterpolationMethod = .cardinal(tension: 0.6)
+    /// Chart lines: a gentle curve rather than hard vertices. Monotone passes through
+    /// every real sample and never overshoots one — a cardinal spline swung below zero
+    /// after every drop, drawing traffic that couldn't have happened.
+    static let curve: InterpolationMethod = .monotone
 
     static func lineStyle(width: CGFloat) -> StrokeStyle {
         StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
