@@ -141,6 +141,32 @@ final class MonitorEngine {
         return "network-usage-\(period.rawValue)-\(scope.rawValue)-\(day).csv"
     }
 
+    /// The app's sessions over the minute history's 7-day retention, newest first.
+    func sessions(for key: String) async -> [AppSession] {
+        guard let store else { return [] }
+        let scope = scope
+        let since = Date().addingTimeInterval(-7 * 86_400)
+
+        do {
+            var byMinute = Dictionary(
+                try await store.minuteSeries(key: key, scope: scope, since: since).map { ($0.date, $0.bytes) },
+                uniquingKeysWith: +
+            )
+            // Read after the await, so a flush that ran meanwhile isn't counted twice.
+            // Unflushed minutes are added so a session in progress is current.
+            for (bucket, batch) in pending {
+                guard let counters = batch[key] else { continue }
+                let (received, sent) = counters.bytes(for: scope)
+                byMinute[bucket, default: 0] += received + sent
+            }
+            let points = byMinute.map { UsagePoint(date: $0.key, bytes: $0.value) }.sorted { $0.date < $1.date }
+            return MonitorCore.sessions(from: points)
+        } catch {
+            errorMessage = "Could not read history: \(error)"
+            return []
+        }
+    }
+
     /// Writes out whatever has been sampled but not yet committed. Quitting without
     /// this discards up to a flush interval of usage.
     func flushBeforeQuit() async {
