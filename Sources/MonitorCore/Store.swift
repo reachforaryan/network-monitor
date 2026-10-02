@@ -222,6 +222,33 @@ public actor Store {
         return series
     }
 
+    /// One app's minute buckets since `since`, oldest first — the raw material for sessions.
+    public func minuteSeries(key: String, scope: Scope, since: Date) throws -> [UsagePoint] {
+        let (received, sent) = scope.columns
+        let statement = try prepare(
+            """
+            SELECT bucket, \(received) + \(sent)
+              FROM \(Grain.minute.table)
+             WHERE app_key = ? AND bucket >= ?
+             ORDER BY bucket
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, key, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, bucket(since, grain: .minute))
+
+        var points: [UsagePoint] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            points.append(
+                UsagePoint(
+                    date: Date(timeIntervalSince1970: TimeInterval(sqlite3_column_int64(statement, 0))),
+                    bytes: UInt64(clamping: sqlite3_column_int64(statement, 1))
+                )
+            )
+        }
+        return points
+    }
+
     // MARK: - Internals
 
     func bucket(_ date: Date, grain: Grain) -> Int64 {

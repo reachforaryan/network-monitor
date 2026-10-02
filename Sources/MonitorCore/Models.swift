@@ -167,3 +167,50 @@ public func compactRate(_ bytesPerSecond: Double) -> String {
 
     return String(repeating: " ", count: max(0, 3 - digits.count)) + digits + unit.suffix
 }
+
+/// One stretch of continuous use by an app, e.g. an evening of cloud gaming.
+public struct AppSession: Sendable, Identifiable, Equatable {
+    public let start: Date
+    public let end: Date
+    public let bytes: UInt64
+
+    public init(start: Date, end: Date, bytes: UInt64) {
+        self.start = start
+        self.end = end
+        self.bytes = bytes
+    }
+
+    public var id: Date { start }
+    public var duration: TimeInterval { end.timeIntervalSince(start) }
+}
+
+/// Groups an app's minute buckets (oldest first) into sessions, newest first.
+///
+/// Derived on demand from history already recorded for every app, so there is no
+/// per-app tracking to configure. Minutes below `minimumBytes` count as idle, so a
+/// launcher's background trickle doesn't glue two sessions together.
+// ponytail: fixed 5-min gap and 100 KB/min idle floor; make them per-app settings if
+// some app's sessions split or merge wrongly.
+public func sessions(
+    from points: [UsagePoint],
+    gap: TimeInterval = 5 * 60,
+    minimumBytes: UInt64 = 100_000
+) -> [AppSession] {
+    var result: [AppSession] = []
+    var current: (start: Date, last: Date, bytes: UInt64)?
+
+    for point in points where point.bytes >= minimumBytes {
+        if let open = current, point.date.timeIntervalSince(open.last) <= gap {
+            current = (open.start, point.date, open.bytes + point.bytes)
+        } else {
+            if let open = current {
+                result.append(AppSession(start: open.start, end: open.last + 60, bytes: open.bytes))
+            }
+            current = (point.date, point.date, point.bytes)
+        }
+    }
+    if let open = current {
+        result.append(AppSession(start: open.start, end: open.last + 60, bytes: open.bytes))
+    }
+    return result.reversed()
+}
