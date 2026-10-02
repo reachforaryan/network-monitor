@@ -28,8 +28,10 @@ between internet-only and all traffic (which includes loopback and local connect
 
 - **Attributes traffic to apps**, not just interfaces. Helper processes roll up under
   their parent, so all of Chrome's renderers count as Chrome.
-- **Keeps history** — minute resolution for a week, hourly and daily for over a year, in
-  a local SQLite file.
+- **Breaks usage into sessions** — how much one evening of cloud gaming or one long
+  download actually used, not just a daily total.
+- **Keeps history** — minute resolution for a week, hourly and daily for over a year,
+  and every finished session indefinitely, in a local SQLite file.
 - **Runs light.** ~1% CPU, ~70 MB, no background daemon, no kernel extension.
 - **Stays local.** Nothing leaves the machine. No network calls, no telemetry, no account.
 
@@ -37,15 +39,32 @@ between internet-only and all traffic (which includes loopback and local connect
 <img src="docs/detail.png" width="880" alt="Detail window">
 </div>
 
-The detail window charts total throughput against the top apps over the selected period,
-and lists every process that moved a byte.
+The detail window charts the top apps over the selected period against a shaded backdrop
+of all traffic, and lists every process that moved a byte.
+
+## Sessions
+
+<div align="center">
+<img src="docs/sessions.png" width="640" alt="Sessions for one app">
+</div>
+
+Click any app — in the dropdown or the detail list — to see its sessions: each stretch of
+continuous use, with when it started and ended, how long it ran, and what it used. Pick
+one for its average and peak speed and a minute-by-minute chart of how hard it pulled.
+
+A session ends after five minutes without meaningful traffic, so a launcher's background
+trickle doesn't glue two evenings together. Sessions are worked out from the history
+already recorded for every app, so there's nothing to set up and no per-app tracking to
+switch on, and finished ones are saved so they outlive the week of minute data they
+come from. Sessions count internet traffic only.
 
 <div align="center">
 <img src="docs/config.png" width="300" alt="Config panel">
 </div>
 
 Filters keep the list useful: hide system daemons, set a minimum traffic threshold, or
-search by name. Filters never change the totals — hiding `mDNSResponder` shouldn't make
+search by name. Speeds can show in Mbps, the unit ISPs and streaming apps quote, instead
+of MB/s. Filters never change the totals — hiding `mDNSResponder` shouldn't make
 your machine look like it used less than it did, so the headline figures stay honest and
 the list header reads `[4/22]`.
 
